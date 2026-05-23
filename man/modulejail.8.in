@@ -1,10 +1,10 @@
 .\" Manpage for modulejail.
-.\" Source: man/modulejail.8.in (templated; build.sh substitutes __VERSION__).
+.\" Source: man/modulejail.8.in (templated; build.sh substitutes __VERSION__ and __DATE__).
 .\" View installed: man 8 modulejail
 .\" v1.2 flags documented below: --whitelist-file PATH, --no-syslog-logging
 .\" (the OPTIONS section uses roff hyphen escapes \-\- so these strings appear
 .\" with literal ASCII dashes only in this comment, for grep-based contract checks.)
-.TH MODULEJAIL 8 "2026-05-18" "modulejail __VERSION__" "System Administration"
+.TH MODULEJAIL 8 "__DATE__" "modulejail __VERSION__" "System Administration"
 
 .SH NAME
 modulejail \- shrink a Linux host's kernel-module attack surface
