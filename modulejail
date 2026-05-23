@@ -708,6 +708,30 @@ render_blacklist_file() {
     emit_install_line "$blacklist"
 }
 
+# _json_escape: escape a string for safe embedding inside a JSON double-quoted
+# value. Handles \, ", and ASCII control characters (U+0000–U+001F). Output is
+# the escaped form of $1 on stdout (no surrounding quotes added by this helper;
+# the caller wraps in "…"). POSIX-portable: awk only. The ord[] table is
+# built in BEGIN by iterating the first 128 ASCII code points.
+_json_escape() {
+    printf '%s' "$1" | awk 'BEGIN {
+        for (i = 0; i < 128; i++) ord[sprintf("%c", i)] = i
+    }
+    {
+        out = ""
+        n = length($0)
+        for (i = 1; i <= n; i++) {
+            c = substr($0, i, 1)
+            v = (c in ord) ? ord[c] : -1
+            if (c == "\\")      { out = out "\\\\" }
+            else if (c == "\"") { out = out "\\\"" }
+            else if (v >= 0 && v < 32) { out = out sprintf("\\u%04x", v) }
+            else                { out = out c }
+        }
+        printf "%s", out
+    }'
+}
+
 # Machine-readable one-line summary (--output-format json|logfmt, OPT-04).
 # Called by the three-way stdout branch when --output-format is set;
 # bypasses --quiet per D-Phase5-09. Schema v1 locked (D-Phase5-10):
@@ -716,7 +740,7 @@ emit_machine_summary() {
     _fmt=$1
     _modules_loaded=$(wc -l < "$workdir/loaded.txt" | awk '{print $1}')
     if [ -n "$WHITELIST_FILE" ]; then
-        _wl_json="\"$WHITELIST_FILE\""
+        _wl_json="\"$(_json_escape "$WHITELIST_FILE")\""
         _wl_lf="$WHITELIST_FILE"
     else
         _wl_json='null'
@@ -730,9 +754,10 @@ emit_machine_summary() {
     case "$_fmt" in
         json)
             printf '{"schema_version":1,"tool":{"name":"modulejail","version":"%s"},"kernel_version":"%s","profile":"%s","dry_run":%s,"whitelist_file":%s,"modules_available":%d,"modules_loaded":%d,"modules_blacklisted":%d,"fingerprint":"%s","output_path":"%s"}\n' \
-                "$VERSION" "$_kver" "$profile" "$_dry" "$_wl_json" \
+                "$(_json_escape "$VERSION")" "$(_json_escape "$_kver")" \
+                "$(_json_escape "$profile")" "$_dry" "$_wl_json" \
                 "$universe_count" "$_modules_loaded" "$blacklist_count" \
-                "$fingerprint" "$output"
+                "$(_json_escape "$fingerprint")" "$(_json_escape "$output")"
             ;;
         logfmt)
             printf 'schema_version=1 tool_name=modulejail tool_version=%s kernel_version=%s profile=%s dry_run=%s whitelist_file=%s modules_available=%d modules_loaded=%d modules_blacklisted=%d fingerprint=%s output_path=%s\n' \
