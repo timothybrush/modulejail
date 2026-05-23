@@ -305,6 +305,13 @@ if [ -z "$WHITELIST_FILE" ] && [ -z "$NO_WHITELIST_FILE" ] && [ -e "$DEFAULT_WHI
     printf 'modulejail: info: using default whitelist file %s (--no-whitelist-file to opt out)\n' "$DEFAULT_WHITELIST_FILE" >&2
 fi
 
+# --- -p none sanity-guard-disabled notice ---
+# The >99% blacklist threshold guard is skipped under -p none (D-Phase5-02).
+# Emit an info: line so fleet log scrapers have a parseable breadcrumb.
+if [ "$profile" = "none" ]; then
+    printf 'modulejail: info: -p none selected; the >99%% blacklist sanity guard is disabled (the loaded-keep invariant remains the boot-safety contract).\n' >&2
+fi
+
 # --- Logger detection (generation-time, one-shot per run) ---
 # The opt-out flag NO_SYSLOG_LOGGING wins. Otherwise, emit the logger
 # install-line iff the running host has an executable logger binary.
@@ -494,7 +501,9 @@ list_loaded   > "$workdir/loaded.txt"
 # BASELINE_* variables are POSIX space-separated strings (NOT bash arrays).
 # We expand them via intentional word-splitting.
 list_baseline() {
+    list=''
     case "$profile" in
+        none) ;;
         minimal)      list=$BASELINE_MINIMAL ;;
         conservative) list=$BASELINE_CONSERVATIVE ;;
         desktop)      list=$BASELINE_DESKTOP ;;
