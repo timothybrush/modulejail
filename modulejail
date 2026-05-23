@@ -744,10 +744,15 @@ comm -23 "$workdir/universe.txt" "$workdir/keep.txt" > "$workdir/blacklist.txt"
 # exclusive (Plan 05-01 mutex guard fires before we reach this point).
 if [ "$VERBOSE" -eq 1 ]; then
     awk '
-        FILENAME ~ /loaded\.txt$/    { src[$1] = "loaded";    next }
+        FILENAME ~ /loaded\.txt$/    { src[$1] = "loaded";    seen_universe[$1]=0; next }
         FILENAME ~ /whitelist\.txt$/ { if (!($1 in src)) src[$1] = "whitelist"; next }
         FILENAME ~ /baseline\.txt$/  { if (!($1 in src)) src[$1] = "baseline"; next }
-        { if ($1 in src) printf "keep: %s (%s)\n", $1, src[$1]; else printf "blacklist: %s\n", $1 }
+        { if ($1 in src) { seen_universe[$1]=1; printf "keep: %s (%s)\n", $1, src[$1] }
+          else printf "blacklist: %s\n", $1 }
+        END {
+            for (m in src) if (!(m in seen_universe) || seen_universe[m] == 0)
+                printf "keep: %s (%s, out-of-tree)\n", m, src[m]
+        }
     ' "$workdir/loaded.txt" "$workdir/whitelist.txt" "$workdir/baseline.txt" \
       "$workdir/universe.txt" >&2
 fi
