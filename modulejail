@@ -676,6 +676,38 @@ emit_install_line() {
     fi
 }
 
+# render_blacklist_file: write the 8-line header block followed by all
+# install directives to stdout. Callers redirect stdout to the desired
+# destination (a tempfile for the real-write path, stderr for dry-run).
+# Using a single function for both paths removes the duplication that
+# previously made drift between the two branches a silent regression risk.
+# All referenced variables (VERSION, profile, _kver, fingerprint,
+# USE_LOGGER, FAIL_ON_MODULE_LOAD, invocation, blacklist) are resolved at
+# call time from the enclosing shell scope.
+render_blacklist_file() {
+    printf '# modulejail %s\n' "$VERSION"
+    printf '# https://github.com/jnuyens/modulejail\n'
+    printf '# profile: %s\n' "$profile"
+    printf '# kernel: %s\n' "$_kver"
+    printf '# fingerprint: sha256:%s\n' "$fingerprint"
+    if [ -n "$USE_LOGGER" ]; then
+        if [ "$FAIL_ON_MODULE_LOAD" -eq 0 ]; then
+            printf '# install-line: /bin/sh + logger (syslog tag: modulejail)\n'
+        else
+            printf '# install-line: /bin/sh + logger + /bin/false (syslog tag: modulejail, --fail-on-module-load)\n'
+        fi
+    else
+        if [ "$FAIL_ON_MODULE_LOAD" -eq 0 ]; then
+            printf '# install-line: /bin/true (silent, --no-syslog-logging or logger absent)\n'
+        else
+            printf '# install-line: /bin/false (silent, --fail-on-module-load)\n'
+        fi
+    fi
+    printf '# invocation: %s\n' "$invocation"
+    printf '# Do not edit by hand — regenerate with modulejail(8).\n'
+    emit_install_line "$blacklist"
+}
+
 # Machine-readable one-line summary (--output-format json|logfmt, OPT-04).
 # Called by the three-way stdout branch when --output-format is set;
 # bypasses --quiet per D-Phase5-09. Schema v1 locked (D-Phase5-10):
@@ -813,34 +845,12 @@ fingerprint=$(sha256sum < "$workdir/fingerprint.input" | awk '{print $1}')
 # can orphan this dotfile in $target_dir.
 if [ "$DRY_RUN" -eq 1 ]; then
     # --dry-run: skip mktemp/chmod/mv entirely. Nothing touches $target_dir.
-    # The would-be 8-line header brace-group is rerouted to stderr so operators
-    # can inspect the header that would have been written without persisting it.
-    # Under --quiet, the header is silenced entirely (--quiet --dry-run produces
-    # zero output; exit code is the only signal).
+    # render_blacklist_file output is rerouted to stderr so operators can
+    # inspect the header and install directives that would have been written
+    # without persisting them. Under --quiet, output is silenced entirely
+    # (--quiet --dry-run produces zero output; exit code is the only signal).
     if [ "$QUIET" -eq 0 ]; then
-        {
-            printf '# modulejail %s\n' "$VERSION"
-            printf '# https://github.com/jnuyens/modulejail\n'
-            printf '# profile: %s\n' "$profile"
-            printf '# kernel: %s\n' "$_kver"
-            printf '# fingerprint: sha256:%s\n' "$fingerprint"
-            if [ -n "$USE_LOGGER" ]; then
-                if [ "$FAIL_ON_MODULE_LOAD" -eq 0 ]; then
-                    printf '# install-line: /bin/sh + logger (syslog tag: modulejail)\n'
-                else
-                    printf '# install-line: /bin/sh + logger + /bin/false (syslog tag: modulejail, --fail-on-module-load)\n'
-                fi
-            else
-                if [ "$FAIL_ON_MODULE_LOAD" -eq 0 ]; then
-                    printf '# install-line: /bin/true (silent, --no-syslog-logging or logger absent)\n'
-                else
-                    printf '# install-line: /bin/false (silent, --fail-on-module-load)\n'
-                fi
-            fi
-            printf '# invocation: %s\n' "$invocation"
-            printf '# Do not edit by hand — regenerate with modulejail(8).\n'
-            emit_install_line "$blacklist"
-        } >&2
+        render_blacklist_file >&2
     fi
 else
     tmp=$(mktemp "${target_dir}/.modulejail-blacklist.conf.XXXXXX") || {
@@ -848,37 +858,14 @@ else
         exit $EX_CANTCREAT
     }
 
-    # Write 8-line header + one install line per blacklisted module. The install
-    # line takes one of two forms depending on the generation-time logger
-    # detection (see USE_LOGGER above); emit_install_line picks the right form
-    # and the header documents which one was chosen.
-    # Header contains tool version + repo URL + profile + kernel + sha256 fingerprint +
-    # install-line annotation + invocation + edit-by-hand disclaimer. NO wall-clock;
-    # header is a deterministic function of inputs. Fingerprint is computed above the
-    # render block.
-    {
-        printf '# modulejail %s\n' "$VERSION"
-        printf '# https://github.com/jnuyens/modulejail\n'
-        printf '# profile: %s\n' "$profile"
-        printf '# kernel: %s\n' "$_kver"
-        printf '# fingerprint: sha256:%s\n' "$fingerprint"
-        if [ -n "$USE_LOGGER" ]; then
-            if [ "$FAIL_ON_MODULE_LOAD" -eq 0 ]; then
-                printf '# install-line: /bin/sh + logger (syslog tag: modulejail)\n'
-            else
-                printf '# install-line: /bin/sh + logger + /bin/false (syslog tag: modulejail, --fail-on-module-load)\n'
-            fi
-        else
-            if [ "$FAIL_ON_MODULE_LOAD" -eq 0 ]; then
-                printf '# install-line: /bin/true (silent, --no-syslog-logging or logger absent)\n'
-            else
-                printf '# install-line: /bin/false (silent, --fail-on-module-load)\n'
-            fi
-        fi
-        printf '# invocation: %s\n' "$invocation"
-        printf '# Do not edit by hand — regenerate with modulejail(8).\n'
-        emit_install_line "$blacklist"
-    } > "$tmp"
+    # Write 8-line header + one install line per blacklisted module via
+    # render_blacklist_file, which uses the same code path as --dry-run.
+    # The install line takes one of two forms depending on the generation-time
+    # logger detection (see USE_LOGGER above); emit_install_line picks the right
+    # form and the header documents which one was chosen.
+    # NO wall-clock; header is a deterministic function of inputs.
+    # Fingerprint is computed above the render block.
+    render_blacklist_file > "$tmp"
 
     # Set world-readable permissions before rename (umask may be too restrictive;
     # modprobe.d files must be readable by all).
