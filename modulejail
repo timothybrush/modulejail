@@ -884,14 +884,13 @@ else
     mv -- "$tmp" "$output"
 fi
 
-# Single-line success summary on stdout.
-# Parseable by `awk -F'[ ()=:>-]+'` for fleet log aggregators;
-# quiet enough not to spam Ansible/Puppet output. Under --dry-run
-# the line is prefixed with 'DRY-RUN: would ' (two extra lexical
-# tokens; fleet aggregators see one extra field at column 2).
-# Under --quiet this entire block is silenced; exit code is the only signal.
-# Plan 05-05 adds the --output-format three-way branch on top of this if/else.
-if [ "$QUIET" -eq 0 ]; then
+# Stdout summary: three-way branch (D-Phase5-09, D-Phase5-12).
+# D-Phase5-12: --output-format REPLACES the human-readable summary.
+# D-Phase5-09: JSON/logfmt IS the parser surface; --quiet does NOT silence it.
+if [ -n "$OUTPUT_FORMAT" ]; then
+    # Machine-readable: emits regardless of --quiet (D-Phase5-09).
+    emit_machine_summary "$OUTPUT_FORMAT"
+elif [ "$QUIET" -eq 0 ]; then
     if [ "$DRY_RUN" -eq 1 ]; then
         printf 'modulejail: DRY-RUN: would blacklist %d of %d modules (profile=%s) -> %s\n' \
             "$blacklist_count" "$universe_count" "$profile" "$output"
