@@ -701,6 +701,22 @@ cat "$workdir/loaded.txt" "$workdir/baseline.txt" "$workdir/whitelist.txt" | sor
 # comm -23 requires both inputs to be sorted; both universe.txt and keep.txt are.
 comm -23 "$workdir/universe.txt" "$workdir/keep.txt" > "$workdir/blacklist.txt"
 
+# Per-module decision lines for --verbose (D-Phase5-07, OPT-03).
+# Single awk pass over the four sorted files: first-write-wins precedence
+# (loaded > whitelist > baseline). One fork, O(n). Decision lines go to stderr;
+# no severity prefix (operator-requested telemetry, not script-status diagnostics).
+# This block sits outside any QUIET guard: --quiet and --verbose are mutually
+# exclusive (Plan 05-01 mutex guard fires before we reach this point).
+if [ "$VERBOSE" -eq 1 ]; then
+    awk '
+        FILENAME ~ /loaded\.txt$/    { src[$1] = "loaded";    next }
+        FILENAME ~ /whitelist\.txt$/ { if (!($1 in src)) src[$1] = "whitelist"; next }
+        FILENAME ~ /baseline\.txt$/  { if (!($1 in src)) src[$1] = "baseline"; next }
+        { if ($1 in src) printf "keep: %s (%s)\n", $1, src[$1]; else printf "blacklist: %s\n", $1 }
+    ' "$workdir/loaded.txt" "$workdir/whitelist.txt" "$workdir/baseline.txt" \
+      "$workdir/universe.txt" >&2
+fi
+
 # Expose result path for the renderer below.
 # shellcheck disable=SC2034  # consumed by the render block via $blacklist
 blacklist="$workdir/blacklist.txt"
