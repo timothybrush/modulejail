@@ -1,0 +1,64 @@
+# CI for ModuleJail. Lints + runs tests/run-fixtures.sh per fixture-tier axis.
+# Spec: .planning/phases/06-release-hardening/06-04-PLAN.md, D-Phase6-06..09.
+# Five named jobs (lint, arch, alpine, opensuse, host-local) produce the
+# five GH check rows that D-Phase6-10's branch protection list names verbatim.
+
+name: ci
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get update -qq && sudo apt-get install -y shellcheck
+      - name: shellcheck --shell=sh
+        run: |
+          shellcheck --shell=sh \
+            modulejail \
+            tests/run-fixtures.sh \
+            tests/lib/*.sh \
+            tests/cases/*.sh \
+            scripts/*.sh
+
+  arch:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run arch fixture
+        run: sh tests/run-fixtures.sh --only-container arch
+
+  alpine:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run alpine fixture
+        run: sh tests/run-fixtures.sh --only-container alpine
+
+  opensuse:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run opensuse fixture
+        run: sh tests/run-fixtures.sh --only-container opensuse
+
+  host-local:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run host-local cases
+        run: sh tests/run-fixtures.sh --only-host-local
