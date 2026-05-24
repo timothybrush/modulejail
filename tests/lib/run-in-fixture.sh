@@ -55,8 +55,12 @@ out=$(/usr/local/bin/modulejail -o /tmp/fixture-run1.conf)
 echo "$out" | grep -qE '^modulejail: blacklisted [0-9]+ of [0-9]+ modules \(profile=conservative\) -> /tmp/fixture-run1\.conf$'
 
 printf '== [%s] (7) idempotency: two runs byte-identical ==\n' "$DISTRO"
-/usr/local/bin/modulejail -o /tmp/fixture-run2.conf > /dev/null
-assert_cmp /tmp/fixture-run1.conf /tmp/fixture-run2.conf
+# Run twice into the SAME output path so the `# invocation:` header line (which
+# embeds the -o argument verbatim) does not falsely diff. Preserve run-1 output
+# via copy before run-2 overwrites the target.
+cp /tmp/fixture-run1.conf /tmp/fixture-run1-saved.conf
+/usr/local/bin/modulejail -o /tmp/fixture-run1.conf > /dev/null
+assert_cmp /tmp/fixture-run1-saved.conf /tmp/fixture-run1.conf
 
 printf '== [%s] (8) output is syntactically valid modprobe.d ==\n' "$DISTRO"
 # Body lines must be either comments, install lines, or blank. Two install-line
