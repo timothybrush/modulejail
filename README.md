@@ -35,6 +35,37 @@ shell script, run once on a steady-state host, that writes
 `/etc/modprobe.d/modulejail-blacklist.conf` to blacklist the thousands of
 unused modules, specific to your system.
 
+## Threat model
+
+ModuleJail defends against one thing: **unprivileged-user → root privilege
+escalation via vulnerable kernel modules**. The threat actor is a local
+user (or a compromised non-root service) who would otherwise trigger
+automatic loading of a vulnerable module via an ordinary syscall -
+`socket(AF_VSOCK, ...)`, `socket(AF_ALG, ...)`, `execve()` of a binary
+with an obscure binfmt magic, opening a device node, and so on. The
+recent "Copy Fail" CVE (CVE-2026-31431, April 2026, root via
+`algif_aead`) is exactly this pattern, and the upstream mitigation every
+advisory recommends - `install algif_aead /bin/false` in
+`/etc/modprobe.d/` - is one line of what ModuleJail generates
+automatically, applied to the entire class of unused modules.
+
+ModuleJail does **not** defend against attackers who already have root.
+Root can `insmod /path/to/module.ko` directly, bypassing `modprobe`
+entirely and never consulting `modprobe.d/`. Root can also
+`modprobe --ignore-install <name>` to skip the install-line indirection.
+Both are intentional kernel escape hatches for root. If your threat
+model includes a malicious root user, you need different tools: Secure
+Boot + kernel lockdown mode, module signature enforcement, IMA/EVM, or
+`kernel.modules_disabled=1` after boot settles.
+
+For the full taxonomy of what unprivileged users can trigger, and
+recipes for stacking other kernel hardening on top, see
+**[docs/DEFENSE-IN-DEPTH.md](docs/DEFENSE-IN-DEPTH.md)**.
+
+Treat ModuleJail as the "lock the front door" tool. It is the cheapest,
+broadest, lowest-blast-radius layer in a kernel-hardening stack -
+deploy it first; the deeper recipes compose on top.
+
 ## Quickstart
 
 ```sh
@@ -458,8 +489,11 @@ ModuleJail is a default-safe policy layer: it removes the
 auto-loading attack surface (udev hotplug + dependency resolution),
 which is what an unprivileged or remote attacker has to work with. It
 does not - and could not - prevent a root user with intent from
-loading anything they want. Treat the blacklist as the "lock the
-front door" tool, not as the "lock the safe" tool.
+loading anything they want. See the [Threat model](#threat-model)
+section above for the full framing, and
+[docs/DEFENSE-IN-DEPTH.md](docs/DEFENSE-IN-DEPTH.md) for recipes that
+close the root-with-intent gap (kernel lockdown mode, module signature
+enforcement, `kernel.modules_disabled=1`).
 
 ## Exit codes
 
