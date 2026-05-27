@@ -572,9 +572,9 @@ above.
 .B "# Do not edit by hand -- regenerate with modulejail(8)."
 Disclaimer. Edits are overwritten on the next run.
 .PP
-This section satisfies the HDR-01 documentation requirement. The
+The
 .B # kernel:
-line is the regression-lock target: test suite fixture
+line is regression-locked: test suite fixture
 .I header-kernel-line-locked.sh
 asserts that this line exists and carries a non-empty kernel-version
 token in every generated file. See
