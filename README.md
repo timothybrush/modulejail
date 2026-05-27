@@ -470,6 +470,41 @@ was not set, ModuleJail silently falls back to the `/bin/true` form
 (matching the v1.1.4 behaviour on minimal hosts). No stderr warning is
 emitted; the header annotation is the only visible cue.
 
+## Failing on blocked module loads (`-f` / `--fail-on-module-load`)
+
+By default, blacklisted module loads succeed silently: the generated
+install lines end with `exit 0` (when logger is present) or `/bin/true`
+(when it is not), so `modprobe <module>` returns 0 even though the module
+was not actually loaded. This is the safe default — it prevents
+breakage in scripts and services that unconditionally call `modprobe`
+and check its return code.
+
+To make blocked loads fail loudly instead, pass `-f` or
+`--fail-on-module-load`:
+
+```sh
+sudo modulejail -f
+sudo modulejail --fail-on-module-load
+```
+
+With this flag, the install-line body uses `/bin/false` instead of
+`exit 0` or `/bin/true`, so `modprobe <module>` returns a non-zero exit
+code for blacklisted modules. This is useful when you want tooling to
+detect and alert on blocked module attempts rather than silently
+swallowing them.
+
+The header annotation reflects the mode:
+
+```
+# install-line: /bin/sh + logger + /bin/false (syslog tag: modulejail, --fail-on-module-load)
+```
+
+or, without logger:
+
+```
+# install-line: /bin/false (silent, --fail-on-module-load)
+```
+
 ## Scope of the blacklist (what it blocks, what it doesn't)
 
 A `modprobe.d` blacklist blocks **automatic** module loading: udev
@@ -494,6 +529,27 @@ section above for the full framing, and
 [docs/DEFENSE-IN-DEPTH.md](docs/DEFENSE-IN-DEPTH.md) for recipes that
 close the root-with-intent gap (kernel lockdown mode, module signature
 enforcement, `kernel.modules_disabled=1`).
+
+## Options reference
+
+| Option | Description |
+|--------|-------------|
+| `-p`, `--profile {minimal\|conservative\|desktop}` | Built-in baseline profile (default: `conservative`) |
+| `-o`, `--output PATH` | Output path for the generated blacklist file (default: `/etc/modprobe.d/modulejail-blacklist.conf`) |
+| `--whitelist-file PATH` | Append module names from PATH to the keep-set. One module per line; `#` starts a comment. File must not be group- or world-writable. Default: `/etc/modulejail/whitelist.conf` |
+| `--no-whitelist-file` | Skip the default whitelist file even if present. Mutually exclusive with `--whitelist-file PATH` |
+| `--no-syslog-logging` | Force `/bin/true` install lines (v1.1.4 behavior). By default, blocked module loads are logged to syslog with tag `modulejail` |
+| `-f`, `--fail-on-module-load` | Blocked module loads return a non-zero exit code (`modprobe` fails loudly). Default: blocked loads silently succeed |
+| `-V`, `--version` | Show program version and exit |
+| `-h`, `--help` | Show help text and exit |
+
+Environment variables:
+
+| Variable | Description |
+|----------|-------------|
+| `MODULEJAIL_NO_UPDATE_CHECK` | Set to any non-empty value to skip the post-run update check |
+| `MODULEJAIL_LOGGER_PATH` | Path to the logger binary for syslog install-line detection (default: `/usr/bin/logger`) |
+| `MODULEJAIL_DEFAULT_WHITELIST_FILE` | Override the auto-detected whitelist path (default: `/etc/modulejail/whitelist.conf`) |
 
 ## Exit codes
 
