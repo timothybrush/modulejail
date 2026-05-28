@@ -674,6 +674,30 @@ make the unblock permanent, remove the blacklist file. See *Scope of the
 blacklist* above for the precise list of what `modprobe.d` install
 directives do and do not intercept.
 
+## Community resources
+
+Operator-authored knowledge bases and packaging maintained outside
+the upstream repo:
+
+- **Manjaro forum HOWTO** - community wiki post covering installation
+  via AUR, per-profile usage notes, operator-curated whitelist
+  examples, and a reference database of 20+ kernel modules and the
+  programs that need them. Authored by @andreas85; collaboratively
+  edited (wiki-post format). https://forum.manjaro.org/t/howto-modulejail/187877
+- **AUR packages** - Arch Linux User Repository.
+  - [`modulejail`](https://aur.archlinux.org/packages/modulejail) -
+    tagged-release package, maintained by upstream. Tracks the latest
+    `vX.Y.Z` GitHub release.
+  - [`modulejail-git`](https://aur.archlinux.org/packages/modulejail-git) -
+    rolling-from-master package, maintained by @tjmnmk (with upstream
+    as co-maintainer). Rebuilds from `master` HEAD on every
+    `pacman -Syu`. For developers and early adopters; production
+    operators should stay on `modulejail`.
+
+Have something to add? Open an issue or PR to extend this list; the
+project intentionally keeps these pointers in-repo rather than
+proliferating them across the documentation surface.
+
 ## Contributing
 
 The test matrix lives in `tests/`. Both harnesses are POSIX shell scripts
