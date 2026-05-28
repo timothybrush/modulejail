@@ -5,6 +5,38 @@ All notable changes to ModuleJail are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.3] - 2026-05-29
+
+Hotfix release. The v1.3.2 baseline additions (this morning) broke
+the v1.1.4 byte-identical regression test in CI: three of the newly-
+baselined modules (`inet_diag`, `tcp_diag`, `udp_diag`) were present
+in the v1.1.4-era reference fixture, so moving them from blacklisted
+to kept shifted the install-line count by 3 (6363 -> 6360). The
+modulejail binary's behavior was correct in v1.3.2; the failing test
+was a reference-fixture issue, not a code issue.
+
+### Fixed
+
+- `tests/fixtures/v1.1.4-regression/expected-blacklist.conf`
+  regenerated to reflect the v1.3.2 baseline additions. The contract
+  scope is clarified in `tests/cases/v1.1.4-regression.sh`: the
+  v1.1.4 byte-identical regression contract applies to the install-
+  line **rendering** (the per-line `install <name> /bin/true` form),
+  not to the **set** of modules that end up in the file. Intentional
+  baseline additions are allowed to change the module set; the test
+  reference is updated in the same commit. Future baseline additions
+  follow the same pattern.
+
+### Notes
+
+- Operators already on v1.3.2 do not need to upgrade for any
+  behavioral reason; v1.3.3 ships identical modulejail logic. The
+  upgrade is recommended only for clean CI signaling and to be on
+  the latest tag.
+- Adding `tests/run-fixtures.sh` to the pre-release pre-flight (it
+  was previously implicit via CI-on-push; running it locally before
+  tagging would have caught this).
+
 ## [1.3.2] - 2026-05-29
 
 Patch release. Baseline maturation driven by operator feedback - the
