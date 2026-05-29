@@ -1,6 +1,6 @@
 Name:           modulejail
 Version:        __VERSION__
-Release:        1%{?dist}
+Release:        __RELEASE__
 Summary:        Shrink Linux kernel-module attack surface
 
 License:        GPL-3.0-only

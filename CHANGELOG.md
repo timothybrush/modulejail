@@ -5,6 +5,43 @@ All notable changes to ModuleJail are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0-beta.2] - 2026-05-29
+
+Pre-release. Same systemd-integration substance as v1.5.0-beta.1; two
+prerelease-handling gaps in the packaging/test surfaces fixed.
+
+### Fixed
+
+- `tests/lib/run-in-fixture.sh` SemVer regex (`[0-9]+\.[0-9]+\.[0-9]+`)
+  did not accept SemVer 2.0.0 prerelease tags, so the container fixture
+  tests (arch / alpine / opensuse) rejected v1.5.0-beta.1 as invalid.
+  Extended the regex to accept an optional `-prerelease.N` suffix
+  (`[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?`).
+- `packaging/build.sh` could not build `.rpm` for SemVer prereleases
+  because RPM's `Version:` field rejects `-` characters. Now splits
+  `X.Y.Z-prerelease.N` into `Version: X.Y.Z` + `Release: 0.1.<pre>.<N>%{?dist}`
+  per the Fedora packaging guidelines (leading `0.` ensures the
+  prerelease sorts before the final `Release: 1`). Stable releases
+  (no `-` in VERSION) pass through unchanged. The RPM staging tardir
+  also switches from `modulejail-$VERSION` to `modulejail-$RPM_VERSION`
+  so the spec's `%setup` default unpacking aligns with `%{version}`.
+- `packaging/rpm/modulejail.spec.in` gains a `__RELEASE__` placeholder
+  alongside the existing `__VERSION__`; both are substituted by
+  build.sh's RPM step. Stable-release output for Release: is unchanged
+  (`1%{?dist}`); prereleases get the new `0.N.<pre>%{?dist}` form.
+
+### Notes
+
+- v1.5.0-beta.2 ships **both** `.deb` AND `.rpm` (`.rpm` was missing
+  from beta.1 due to the gap above). Operators on Debian/Ubuntu or
+  RHEL/Fedora/Rocky can now test the systemd integration on either
+  family.
+- AUR `modulejail-git` still needs PKGBUILD updates from @tjmnmk to
+  pick up the systemd integration (see the email coordination thread
+  with the maintainer). AUR pkgver rules also disallow `-`, so the
+  pkgver() function will need similar translation handling. AUR
+  `modulejail` (stable) remains at 1.3.3-1.
+
 ## [1.5.0-beta.1] - 2026-05-29
 
 Pre-release. First beta of the v1.5 systemd integration milestone:

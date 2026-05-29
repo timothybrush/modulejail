@@ -109,7 +109,29 @@ build_rpm() {
     work=$(mktemp -d "${TMPDIR:-/tmp}/modulejail-rpm.XXXXXX")
     trap 'rm -rf "$work"' EXIT INT HUP TERM
 
-    tardir="modulejail-$VERSION"
+    # RPM Version: cannot contain '-' (rpmbuild rejects it). Split SemVer
+    # prereleases (X.Y.Z-prerelease.N) into:
+    #   Version: X.Y.Z
+    #   Release: 0.1.<prerelease.N>%{?dist}
+    # Leading '0.' ensures the prerelease sorts BEFORE the final
+    # (Release=1) per the Fedora packaging guidelines for pre-releases.
+    # Plain X.Y.Z passes through unchanged with Release=1%{?dist}.
+    # The RPM_VERSION-based tardir matches %{name}-%{version} that the
+    # spec's default %setup unpacks; the modulejail script INSIDE the
+    # tarball still carries the full SemVer in its VERSION constant.
+    case $VERSION in
+        *-*)
+            RPM_VERSION=${VERSION%%-*}
+            RPM_PRE=${VERSION#*-}
+            RPM_RELEASE="0.1.${RPM_PRE}%{?dist}"
+            ;;
+        *)
+            RPM_VERSION=$VERSION
+            RPM_RELEASE="1%{?dist}"
+            ;;
+    esac
+
+    tardir="modulejail-$RPM_VERSION"
     mkdir -p "$work/SOURCES" "$work/SPECS" "$work/BUILD" "$work/RPMS" "$work/SRPMS" "$work/BUILDROOT"
 
     # Stage the source tarball that the spec's %setup will unpack.
@@ -122,7 +144,9 @@ build_rpm() {
     tar -czf "$work/SOURCES/$tardir.tar.gz" -C "$staging" "$tardir"
     rm -rf "$staging"
 
-    sed "s/__VERSION__/$VERSION/g" packaging/rpm/modulejail.spec.in > "$work/SPECS/modulejail.spec"
+    sed -e "s/__VERSION__/$RPM_VERSION/g" \
+        -e "s/__RELEASE__/$RPM_RELEASE/g" \
+        packaging/rpm/modulejail.spec.in > "$work/SPECS/modulejail.spec"
 
     # Suppress the per-distro %dist tag so the resulting RPM filename is
     # the same regardless of which RHEL/Fedora major was used to build it
