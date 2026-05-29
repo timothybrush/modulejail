@@ -75,17 +75,13 @@ build_deb() {
     mkdir -p "$work/DEBIAN" \
              "$work/usr/bin" \
              "$work/usr/share/doc/modulejail" \
-             "$work/usr/share/man/man8" \
-             "$work/usr/lib/systemd/system"
+             "$work/usr/share/man/man8"
 
     sed "s/__VERSION__/$VERSION/g" packaging/debian/control.in > "$work/DEBIAN/control"
 
-    install -m 0755 packaging/debian/postinst   "$work/DEBIAN/postinst"
     install -m 0755 modulejail                  "$work/usr/bin/modulejail"
     install -m 0644 packaging/debian/copyright  "$work/usr/share/doc/modulejail/copyright"
     install -m 0644 README.md                   "$work/usr/share/doc/modulejail/README.md"
-    install -m 0644 systemd/modulejail.service  "$work/usr/lib/systemd/system/modulejail.service"
-    install -m 0644 systemd/modulejail.timer  "$work/usr/lib/systemd/system/modulejail.timer"
 
     # Manpage: substitute __VERSION__ and __DATE__, then gzip with -n (no name/timestamp)
     # so the .deb is byte-deterministic across rebuilds with identical inputs.
@@ -109,29 +105,7 @@ build_rpm() {
     work=$(mktemp -d "${TMPDIR:-/tmp}/modulejail-rpm.XXXXXX")
     trap 'rm -rf "$work"' EXIT INT HUP TERM
 
-    # RPM Version: cannot contain '-' (rpmbuild rejects it). Split SemVer
-    # prereleases (X.Y.Z-prerelease.N) into:
-    #   Version: X.Y.Z
-    #   Release: 0.1.<prerelease.N>%{?dist}
-    # Leading '0.' ensures the prerelease sorts BEFORE the final
-    # (Release=1) per the Fedora packaging guidelines for pre-releases.
-    # Plain X.Y.Z passes through unchanged with Release=1%{?dist}.
-    # The RPM_VERSION-based tardir matches %{name}-%{version} that the
-    # spec's default %setup unpacks; the modulejail script INSIDE the
-    # tarball still carries the full SemVer in its VERSION constant.
-    case $VERSION in
-        *-*)
-            RPM_VERSION=${VERSION%%-*}
-            RPM_PRE=${VERSION#*-}
-            RPM_RELEASE="0.1.${RPM_PRE}%{?dist}"
-            ;;
-        *)
-            RPM_VERSION=$VERSION
-            RPM_RELEASE="1%{?dist}"
-            ;;
-    esac
-
-    tardir="modulejail-$RPM_VERSION"
+    tardir="modulejail-$VERSION"
     mkdir -p "$work/SOURCES" "$work/SPECS" "$work/BUILD" "$work/RPMS" "$work/SRPMS" "$work/BUILDROOT"
 
     # Stage the source tarball that the spec's %setup will unpack.
@@ -139,14 +113,12 @@ build_rpm() {
     # %install can just copy it into the buildroot.
     staging=$(mktemp -d "${TMPDIR:-/tmp}/modulejail-rpm-stage.XXXXXX")
     mkdir -p "$staging/$tardir"
-    cp modulejail README.md LICENSE systemd/modulejail.service systemd/modulejail.timer "$staging/$tardir/"
+    cp modulejail README.md LICENSE "$staging/$tardir/"
     sed -e "s/__VERSION__/$VERSION/g" -e "s/__DATE__/$BUILD_DATE/g" man/modulejail.8.in > "$staging/$tardir/modulejail.8"
     tar -czf "$work/SOURCES/$tardir.tar.gz" -C "$staging" "$tardir"
     rm -rf "$staging"
 
-    sed -e "s/__VERSION__/$RPM_VERSION/g" \
-        -e "s/__RELEASE__/$RPM_RELEASE/g" \
-        packaging/rpm/modulejail.spec.in > "$work/SPECS/modulejail.spec"
+    sed "s/__VERSION__/$VERSION/g" packaging/rpm/modulejail.spec.in > "$work/SPECS/modulejail.spec"
 
     # Suppress the per-distro %dist tag so the resulting RPM filename is
     # the same regardless of which RHEL/Fedora major was used to build it

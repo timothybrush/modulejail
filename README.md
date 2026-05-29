@@ -700,6 +700,33 @@ proliferating them across the documentation surface.
 
 ## Contributing
 
+### Branching model
+
+- **`master`** tracks the latest stable release (currently `v1.3.3`).
+  Every commit on `master` is shippable. Hotfixes to the current
+  stable line and small backward-compatible improvements (docs,
+  packaging, small baseline additions) land here.
+- **`v1.5-dev`** (and similar `vX.Y-dev` branches in the future) is
+  the integration branch for an in-flight major or minor milestone.
+  Feature PRs that target a future release go here. Prereleases
+  (`vX.Y.0-beta.N`, `vX.Y.0-rc.N`) are cut from this branch.
+- When the milestone reaches stable, `vX.Y-dev` is merged into
+  `master` and the next milestone's dev branch is created.
+
+PRs:
+
+- Bug fixes / small docs / packaging-only changes -> base against
+  `master`.
+- New features / non-trivial behavior changes -> base against the
+  current dev branch (`v1.5-dev` at the time of writing).
+- Unsure? Open the PR against `master`; we will retarget if needed.
+
+The AUR `modulejail-git` package builds from `master` HEAD (= rolling
+stable), not from the dev branch, so rolling-AUR users always get
+shippable code.
+
+### Tests
+
 The test matrix lives in `tests/`. Both harnesses are POSIX shell scripts
 runnable by anyone with the prerequisites:
 

@@ -23,10 +23,8 @@ export MODULEJAIL_DEFAULT_WHITELIST_FILE=/tmp/default-whitelist-absent.conf
 
 # Version-agnostic SemVer regex. The v1.0.0 fixture hardcoded the literal
 # string "1.0.0", which broke every fixture run after the first version
-# bump. This pattern matches any X.Y.Z plus an optional SemVer 2.0.0
-# prerelease segment (-alpha, -beta.1, -rc.2, etc.), future-proofing
-# across bumps including pre-1.x.0 betas / RCs.
-SEMVER_RE='[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?'
+# bump. This pattern matches any X.Y.Z, future-proofing across bumps.
+SEMVER_RE='[0-9]+\.[0-9]+\.[0-9]+'
 
 printf '== [%s] (1) shellcheck --shell=sh modulejail ==\n' "$DISTRO"
 shellcheck --shell=sh /usr/local/bin/modulejail
