@@ -15,7 +15,7 @@ export LC_ALL
 # --- Tool version + sysexits.h exit code constants ---
 # VERSION is the single source of truth for both --version and the
 # generated blacklist header. Bump on every release per SemVer.
-VERSION='1.3.5'
+VERSION='1.3.6'
 EX_OK=0
 # sysexits.h conventional codes (see man 3 sysexits):
 #   64=usage 65=dataerr 66=noinput 70=software 71=oserr 73=cantcreat 77=noperm
@@ -782,11 +782,12 @@ parse_whitelist_file() {
 emit_install_line() {
     if [ -n "$USE_LOGGER" ]; then
         if [ "$VERBOSE_LOGGING" -eq 1 ]; then
-            # Verbose form (v1.3.4+, fixed in v1.3.5 per @retry-the-user
-            # in #18): enrich the logger call with the caller's PID,
-            # loginuid, parent comm, and argv[0] read from /proc/$PPID/.
+            # Verbose form (v1.3.4+, fixed in v1.3.5 and v1.3.6 per
+            # @retry-the-user in #18): enrich the logger call with the
+            # caller's PID, loginuid, parent comm, and argv[0] read
+            # from /proc/$PPID/.
             #
-            # Two key properties:
+            # Three key properties:
             #
             # 1. NO `/bin/sh -c '...'` wrapper. modprobe invokes install
             #    commands via system() = sh -c "<command>", so wrapping
@@ -797,27 +798,36 @@ emit_install_line() {
             #    to modprobe.
             #
             # 2. cmdline is piped through tr twice: first to strip
-            #    control bytes (\x01-\x08 \x0b-\x1f \x7f - i.e. everything
-            #    non-printable except space \x20 and the NUL separators
-            #    we handle in the next stage), then to convert NUL to
-            #    space so the argv elements show as space-separated.
-            #    Why tr-then-tr instead of cat: shell command
-            #    substitution strips NULs from captured output, which
-            #    would concatenate argv elements ("modprobecpuid").
-            #    Why strip control bytes: defense against log injection
-            #    via attacker-controlled cmdline content (newlines,
-            #    terminal-control sequences). Shell command substitution
-            #    treats the substituted text as data (no second
-            #    expansion pass), so command injection through cmdline
-            #    is not possible; this is hardening against log
-            #    injection only.
+            #    control bytes (\\x01-\\x08 \\x0b-\\x1f \\x7f), then to
+            #    convert NUL to space so the argv elements show as
+            #    space-separated. Why tr-then-tr instead of cat: shell
+            #    command substitution strips NULs from captured output,
+            #    which would concatenate argv elements ("modprobecpuid").
+            #    Why strip control bytes: defense-in-depth against log
+            #    injection via attacker-controlled cmdline content
+            #    (newlines, terminal-control sequences). Shell command
+            #    substitution treats the substituted text as data (no
+            #    second expansion pass), so command injection through
+            #    cmdline content is not possible; this hardens against
+            #    log injection only.
+            #
+            # 3. Backslash escapes in the install-line text are DOUBLED
+            #    (`\\\\001` etc. emitted, modprobe collapses to `\\001`
+            #    in the file, sh reads it as `\\001`, tr parses as
+            #    octal NUL-byte-1). modprobe's libkmod config parser
+            #    processes `\\\\` → `\\` itself before the install
+            #    command reaches sh. v1.3.5 emitted single-backslash
+            #    `\\001` which modprobe collapsed to bare `001`, giving
+            #    tr the digit string `001-010013-037177` whose
+            #    "1-0" substring tr correctly rejected as a reverse
+            #    range. Verified on Ubuntu 24.04 with kmod 31.
             if [ "$FAIL_ON_MODULE_LOAD" -eq 0 ]; then
                 awk -v tr="$TR_PATH" '{
-                    printf "install %s /usr/bin/logger -t modulejail \"blocked: %s ppid=$PPID pcomm=$(cat /proc/$PPID/comm 2>/dev/null) loginuid=$(cat /proc/$PPID/loginuid 2>/dev/null) pexe=$(%s -d '\''\\001-\\010\\013-\\037\\177'\'' < /proc/$PPID/cmdline 2>/dev/null | %s '\''\\0'\'' '\'' '\'' 2>/dev/null)\" 2>/dev/null; exit 0\n", $1, $1, tr, tr
+                    printf "install %s /usr/bin/logger -t modulejail \"blocked: %s ppid=$PPID pcomm=$(cat /proc/$PPID/comm 2>/dev/null) loginuid=$(cat /proc/$PPID/loginuid 2>/dev/null) pexe=$(%s -d '\''\\\\001-\\\\010\\\\013-\\\\037\\\\177'\'' < /proc/$PPID/cmdline 2>/dev/null | %s '\''\\\\0'\'' '\'' '\'' 2>/dev/null)\" 2>/dev/null; exit 0\n", $1, $1, tr, tr
                 }' "$1"
             else
                 awk -v tr="$TR_PATH" '{
-                    printf "install %s /usr/bin/logger -t modulejail \"blocked: %s ppid=$PPID pcomm=$(cat /proc/$PPID/comm 2>/dev/null) loginuid=$(cat /proc/$PPID/loginuid 2>/dev/null) pexe=$(%s -d '\''\\001-\\010\\013-\\037\\177'\'' < /proc/$PPID/cmdline 2>/dev/null | %s '\''\\0'\'' '\'' '\'' 2>/dev/null)\" 2>/dev/null; /bin/false\n", $1, $1, tr, tr
+                    printf "install %s /usr/bin/logger -t modulejail \"blocked: %s ppid=$PPID pcomm=$(cat /proc/$PPID/comm 2>/dev/null) loginuid=$(cat /proc/$PPID/loginuid 2>/dev/null) pexe=$(%s -d '\''\\\\001-\\\\010\\\\013-\\\\037\\\\177'\'' < /proc/$PPID/cmdline 2>/dev/null | %s '\''\\\\0'\'' '\'' '\'' 2>/dev/null)\" 2>/dev/null; /bin/false\n", $1, $1, tr, tr
                 }' "$1"
             fi
         elif [ "$FAIL_ON_MODULE_LOAD" -eq 0 ]; then

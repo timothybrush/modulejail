@@ -5,6 +5,50 @@ All notable changes to ModuleJail are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.6] - 2026-05-30
+
+Hotfix release. A third bug in v1.3.5's `--verbose-logging` install
+line, caught and root-caused by @retry-the-user in
+[issue #18](https://github.com/jnuyens/modulejail/issues/18) within
+two hours of v1.3.5 shipping. Default (non-verbose) install-line
+form unchanged; v1.1.4 byte-identical contract preserved.
+
+### Fixed
+
+- `--verbose-logging` install-line emitted bare `\001-\010\013-\037\177`
+  as the tr `-d` argument and bare `\0` as the second tr's first
+  argument. modprobe's libkmod config parser processes `\\` → `\` on
+  the install command BEFORE it reaches the shell, so the bare
+  backslash-octal sequences were collapsed to digit strings (`\001`
+  → `001`). tr then saw `001-010013-037177` as its argument and
+  rejected the `1-0` substring as a reverse-collating range
+  (`tr: range-endpoints of '1-0' are in reverse collating sequence
+  order`). The pipe failed, `pexe=` ended up empty, and the syslog
+  entry was incomplete. **Fix:** double the backslashes in the
+  emitted install-line text. `\\001` in the file → modprobe collapses
+  to `\001` → shell passes `\001` to tr → tr parses as octal NUL
+  byte 1, as intended. Same for `\\010`, `\\013`, `\\037`, `\\177`,
+  and `\\0`. Verified end-to-end on Ubuntu 24.04 with kmod 31: the
+  resulting syslog line shows the expected `ppid=$N pcomm=modprobe
+  loginuid=$M pexe=modprobe $args`.
+
+### Credit
+
+@retry-the-user in
+[issue #18](https://github.com/jnuyens/modulejail/issues/18) for the
+real-time test of v1.3.5, the `tr: range-endpoints of '1-0'` error
+report, and the diagnosis that backslash doubling was the right fix.
+
+### Notes
+
+- v1.3.4 and v1.3.5 had related issues in the verbose-logging
+  install line; v1.3.6 is the first version with `--verbose-logging`
+  that actually emits correct syslog entries on a stock Linux host
+  with modprobe + GNU coreutils tr. Operators on either v1.3.4 or
+  v1.3.5 using `--verbose-logging` should upgrade. Operators not
+  using `--verbose-logging` see no behavior difference (the default
+  install line is byte-identical across the v1.3.4→v1.3.6 patches).
+
 ## [1.3.5] - 2026-05-30
 
 Hotfix release. Two bugs in v1.3.4's `--verbose-logging` install line,

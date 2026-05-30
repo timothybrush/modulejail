@@ -66,11 +66,18 @@ assert_grep 'pcomm=\$\(cat /proc/\$PPID/comm' "$OUT_VERBOSE" body-verbose-pcomm
 # as space-separated. Per @retry-the-user in #18. Using grep -F
 # (fixed string) here because the install-line content has literal
 # backslash-octal sequences that are awkward to match in ERE.
-if ! grep -F -e "pexe=\$(/usr/bin/tr -d '\\001-\\010\\013-\\037\\177' < /proc/\$PPID/cmdline" "$OUT_VERBOSE" > /dev/null; then
-    case_fail "pexe tr -d control-strip pattern not found in $OUT_VERBOSE"
+# Backslashes are DOUBLED in the install-line text (v1.3.6 per
+# @retry-the-user in #18): modprobe's libkmod config parser collapses
+# \\ → \ when reading the install command, so `\\001` in the file
+# becomes `\001` at the shell, which tr then interprets as octal byte 1.
+# v1.3.5 emitted bare `\001` which modprobe collapsed to `001`, giving
+# tr a digit string whose `1-0` substring tr correctly rejected as a
+# reverse range. Verified on Ubuntu 24.04 + kmod 31.
+if ! grep -F -e "pexe=\$(/usr/bin/tr -d '\\\\001-\\\\010\\\\013-\\\\037\\\\177' < /proc/\$PPID/cmdline" "$OUT_VERBOSE" > /dev/null; then
+    case_fail "pexe tr -d control-strip pattern (doubled-backslash form) not found in $OUT_VERBOSE"
 fi
-if ! grep -F -e "| /usr/bin/tr '\\0' ' '" "$OUT_VERBOSE" > /dev/null; then
-    case_fail "pexe tr NUL-to-space pattern not found in $OUT_VERBOSE"
+if ! grep -F -e "| /usr/bin/tr '\\\\0' ' '" "$OUT_VERBOSE" > /dev/null; then
+    case_fail "pexe tr NUL-to-space pattern (doubled-backslash form) not found in $OUT_VERBOSE"
 fi
 
 # Verbose install line MUST NOT have the /bin/sh -c wrapper (v1.3.5;
