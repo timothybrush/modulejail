@@ -1,0 +1,25 @@
+#!/bin/sh
+# prerm script for modulejail
+#
+# Removes the initramfs strip hook before the modulejail binary itself is
+# uninstalled. Runs only on remove / deconfigure, not on upgrade (the
+# replacement package's postinst will re-install the hook in its own
+# install pass).
+
+set -e
+
+case "$1" in
+    remove|deconfigure)
+        if ! /usr/bin/modulejail --uninstall-initramfs-hook; then
+            echo "modulejail: warning: --uninstall-initramfs-hook failed during prerm" >&2
+        fi
+        ;;
+    upgrade|failed-upgrade)
+        ;;
+    *)
+        echo "prerm called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+exit 0

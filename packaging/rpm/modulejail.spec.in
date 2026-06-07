@@ -36,6 +36,29 @@ install -Dm644 README.md    %{buildroot}%{_docdir}/%{name}/README.md
 install -Dm644 LICENSE      %{buildroot}%{_docdir}/%{name}/LICENSE
 install -Dm644 modulejail.8 %{buildroot}%{_mandir}/man8/modulejail.8
 
+%post
+# Install the initramfs strip hook (see gh #19 and
+# docs/DEFENSE-IN-DEPTH.md for the threat-model framing).
+# Best-effort: a failure here does NOT roll back the rpm install.
+if ! /usr/bin/modulejail --install-initramfs-hook; then
+    cat >&2 <<EOF
+modulejail: warning: --install-initramfs-hook failed during %post.
+modulejail: This is non-fatal; the modulejail binary is still installed.
+modulejail: Re-run manually after fixing the underlying issue:
+modulejail:     sudo modulejail --install-initramfs-hook
+EOF
+fi
+
+%preun
+# Remove the initramfs strip hook before the modulejail binary is
+# uninstalled. Run only on full uninstall (\$1 == 0), not on upgrade
+# (\$1 == 1, the replacement package's %post will re-install).
+if [ "$1" -eq 0 ]; then
+    if ! /usr/bin/modulejail --uninstall-initramfs-hook; then
+        echo "modulejail: warning: --uninstall-initramfs-hook failed during %preun" >&2
+    fi
+fi
+
 %files
 %{_bindir}/modulejail
 %dir %{_docdir}/%{name}

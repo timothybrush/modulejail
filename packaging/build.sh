@@ -79,6 +79,11 @@ build_deb() {
 
     sed "s/__VERSION__/$VERSION/g" packaging/debian/control.in > "$work/DEBIAN/control"
 
+    # Maintainer scripts: postinst installs the initramfs strip hook,
+    # prerm removes it (see gh #19, docs/DEFENSE-IN-DEPTH.md).
+    install -m 0755 packaging/debian/postinst  "$work/DEBIAN/postinst"
+    install -m 0755 packaging/debian/prerm     "$work/DEBIAN/prerm"
+
     install -m 0755 modulejail                  "$work/usr/bin/modulejail"
     install -m 0644 packaging/debian/copyright  "$work/usr/share/doc/modulejail/copyright"
     install -m 0644 README.md                   "$work/usr/share/doc/modulejail/README.md"

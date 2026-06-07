@@ -13,8 +13,17 @@ url='https://github.com/jnuyens/modulejail'
 license=('GPL-3.0-only')
 depends=()
 optdepends=('kmod: provides modprobe, which consumes the generated blacklist file at runtime'
-            'util-linux: logger(1) for syslog integration')
+            'util-linux: logger(1) for syslog integration'
+            'mkinitcpio: enables the initramfs strip hook that --install-initramfs-hook drops'
+            'curl: required by --self-update (wget also works)')
 makedepends=('sequoia-sqv')
+# Pacman .install file: post_install / post_upgrade run
+#   `modulejail --install-initramfs-hook --yes` so the mkinitcpio strip
+# hook and pacman trigger get deployed on every install. pre_remove
+# removes them before the binary itself goes. Content lives at
+# packaging/aur/modulejail.install in the upstream repo and is shipped
+# into the AUR repo alongside this PKGBUILD by scripts/publish-aur.sh.
+install=$pkgname.install
 # Source filenames deliberately avoid the .sig/.sign/.asc extensions so
 # makepkg's built-in gpg verifier does NOT auto-trigger; the sole verifier
 # is sequoia-sqv invoked from prepare() (per AUR comment from Velocifyer

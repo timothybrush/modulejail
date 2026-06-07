@@ -1,0 +1,30 @@
+#!/bin/sh
+# postinst script for modulejail
+#
+# Installs the initramfs strip hook (see gh #19 / docs/DEFENSE-IN-DEPTH.md)
+# via `modulejail --install-initramfs-hook --yes`. Best-effort: a failure
+# here does NOT roll back the package install; the modulejail binary is
+# still usable, and the operator can rerun the install manually.
+
+set -e
+
+case "$1" in
+    configure)
+        if ! /usr/bin/modulejail --install-initramfs-hook; then
+            cat >&2 <<EOF
+modulejail: warning: --install-initramfs-hook failed during postinst.
+modulejail: This is non-fatal; the modulejail binary is still installed.
+modulejail: Re-run manually after fixing the underlying issue:
+modulejail:     sudo modulejail --install-initramfs-hook
+EOF
+        fi
+        ;;
+    abort-upgrade|abort-remove|abort-deconfigure)
+        ;;
+    *)
+        echo "postinst called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+exit 0
