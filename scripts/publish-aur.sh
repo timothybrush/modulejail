@@ -128,9 +128,12 @@ else
 fi
 
 # --- regenerate .SRCINFO on the remote Arch host ----------------------------
+# Both PKGBUILD AND modulejail.install must be on the remote so that
+# makepkg can find the install file referenced by `install=$pkgname.install`.
 echo "publish-aur.sh: regenerating .SRCINFO on $REMOTE_BUILD_HOST..."
 ssh "$REMOTE_BUILD_HOST" "rm -rf /tmp/aur-smoke && mkdir -p /tmp/aur-smoke"
-scp -q "$PKGBUILD" "$REMOTE_BUILD_HOST:/tmp/aur-smoke/PKGBUILD"
+scp -q "$PKGBUILD"      "$REMOTE_BUILD_HOST:/tmp/aur-smoke/PKGBUILD"
+scp -q "$INSTALL_FILE"  "$REMOTE_BUILD_HOST:/tmp/aur-smoke/modulejail.install"
 ssh "$REMOTE_BUILD_HOST" 'cd /tmp/aur-smoke && makepkg --printsrcinfo > .SRCINFO'
 SRCINFO_TMP=$(mktemp)
 scp -q "$REMOTE_BUILD_HOST:/tmp/aur-smoke/.SRCINFO" "$SRCINFO_TMP"
