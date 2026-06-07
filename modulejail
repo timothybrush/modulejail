@@ -12,6 +12,23 @@ set -eu
 LC_ALL=C
 export LC_ALL
 
+# Ensure /usr/sbin and /sbin are in PATH. Several initramfs builders we
+# detect for --install-initramfs-hook live there (update-initramfs is in
+# /usr/sbin on Debian, dracut is in /usr/sbin on RHEL/Rocky), and
+# non-root login PATHs on those distros frequently omit those
+# directories. Without this, `command -v update-initramfs` returns
+# nothing for a non-root caller running `--install-initramfs-hook
+# --dry-run`, and detection silently fails. Idempotent for root.
+case ":$PATH:" in
+    *:/usr/sbin:*) ;;
+    *) PATH="$PATH:/usr/sbin" ;;
+esac
+case ":$PATH:" in
+    *:/sbin:*) ;;
+    *) PATH="$PATH:/sbin" ;;
+esac
+export PATH
+
 # --- Tool version + sysexits.h exit code constants ---
 # VERSION is the single source of truth for both --version and the
 # generated blacklist header. Bump on every release per SemVer.
@@ -40,6 +57,9 @@ DRY_RUN=0
 QUIET=0
 VERBOSE=0
 OUTPUT_FORMAT=''
+INITRAMFS_HOOK_ACTION=''
+ASSUME_YES=0
+SELF_UPDATE=0
 
 # Path checked for a site-local whitelist when --whitelist-file is not given.
 # When the file exists, it is loaded automatically with the same strict
@@ -77,7 +97,7 @@ BASELINE_CONSERVATIVE="$BASELINE_MINIMAL virtio virtio_ring virtio_pci virtio_bl
 # Intent: "Laptop or workstation — won't break WiFi, BT, audio, video,
 # CPU governors, or VPN/VM session setup."
 # shellcheck disable=SC2034  # referenced indirectly via the profile case statement
-BASELINE_DESKTOP="$BASELINE_CONSERVATIVE drm drm_kms_helper i915 amdgpu radeon nouveau nvidia ttm video backlight cfg80211 mac80211 iwlwifi iwlmvm iwldvm ath9k ath10k_core ath10k_pci ath11k brcmfmac brcmsmac rtw88_core rtw89_core rtl8xxxu bluetooth btusb btintel btrtl btbcm hci_uart snd snd_pcm snd_timer snd_hda_intel snd_hda_codec snd_hda_codec_realtek snd_hda_codec_hdmi snd_hda_codec_generic snd_usb_audio snd_seq xhci_hcd xhci_pci ehci_hcd ehci_pci uhci_hcd usblp cdc_acm joydev evdev videodev uvcvideo media exfat f2fs ntfs3 isofs cdrom amd64_edac i7core_edac ie31200_edac intel_pstate intel_cstate amd_pstate tun tap"
+BASELINE_DESKTOP="$BASELINE_CONSERVATIVE drm drm_kms_helper i915 amdgpu radeon nouveau nvidia ttm video backlight cfg80211 mac80211 iwlwifi iwlmvm iwldvm ath9k ath10k_core ath10k_pci ath11k brcmfmac brcmsmac rtw88_core rtw89_core rtl8xxxu bluetooth btusb btintel btrtl btbcm hci_uart snd snd_pcm snd_timer snd_hda_intel snd_hda_codec snd_hda_codec_realtek snd_hda_codec_hdmi snd_hda_codec_generic snd_usb_audio snd_seq xhci_hcd xhci_pci ehci_hcd ehci_pci uhci_hcd usblp cdc_acm joydev evdev videodev uvcvideo media exfat f2fs ntfs3 isofs cdrom mmc_core mmc_block amd64_edac i7core_edac ie31200_edac intel_pstate intel_cstate amd_pstate tun tap"
 
 # --- Baseline-addition policy (in effect since v1.3.4) ---
 #
@@ -205,6 +225,35 @@ usage() {
     printf '                    of the default human-readable form. JSON round-trips\n'
     printf '                    through jq; logfmt round-trips through standard\n'
     printf '                    logfmt parsers. Survives --quiet.\n'
+    printf '  --install-initramfs-hook\n'
+    printf '                    Detect the installed initramfs builder (dracut /\n'
+    printf '                    initramfs-tools / mkinitcpio) and install a small\n'
+    printf '                    hook that strips modulejail-blacklist.conf from\n'
+    printf '                    rebuilt initramfs cpios. Closes the upgrade-then-\n'
+    printf '                    stale class of bug (gh #19). Prints the operator-\n'
+    printf '                    runnable rebuild command after writing; does NOT\n'
+    printf '                    rebuild the initramfs (operator schedules that on\n'
+    printf '                    their own time). Requires root. Pair with --dry-run\n'
+    printf '                    to print what would be written without touching\n'
+    printf '                    any file.\n'
+    printf '  --uninstall-initramfs-hook\n'
+    printf '                    Remove all four possible hook file paths regardless\n'
+    printf '                    of which builder is currently detected (handles\n'
+    printf '                    distro migrations). Requires root.\n'
+    printf '  -y, --yes         Skip the interactive confirmation prompt that\n'
+    printf '                    --self-update would otherwise present. Required\n'
+    printf '                    when --self-update is invoked from a non-\n'
+    printf '                    interactive shell (cron, systemd-run, postinst).\n'
+    printf '  --self-update     Fetch the latest stable release from GitHub,\n'
+    printf '                    preview it (incl. SHA-256 of the new bytes), and\n'
+    printf '                    prompt before replacing the running script.\n'
+    printf '                    Operator edits to the SYSADMIN WHITELIST region\n'
+    printf '                    of the script are preserved via marker-bracketed\n'
+    printf '                    splice. External whitelist files (--whitelist-\n'
+    printf '                    file / default path) are NOT touched. Pair with\n'
+    printf '                    --dry-run to preview without prompting, or -y to\n'
+    printf '                    skip the prompt. For packaged installs prefer\n'
+    printf '                    apt/dnf/pacman.\n'
     printf '  -V, --version     Show program version and exit\n'
     printf '  -h, --help        Show this help text and exit\n'
     printf '\n'
@@ -241,6 +290,12 @@ usage() {
     printf '                               Override the auto-detected whitelist path\n'
     printf '                               (default: /etc/modulejail/whitelist.conf).\n'
     printf '                               Test-only plumbing; end-user operators leave unset.\n'
+    printf '  MODULEJAIL_INITRAMFS_BUILDER\n'
+    printf '                               Force the initramfs builder detection to a\n'
+    printf '                               specific value (dracut, initramfs-tools, mkinitcpio)\n'
+    printf '                               for the --install-initramfs-hook / --uninstall-\n'
+    printf '                               initramfs-hook flags. Test-only plumbing; end-user\n'
+    printf '                               operators leave unset.\n'
 }
 
 quote_arg() {
@@ -252,6 +307,470 @@ quote_arg() {
             printf '%s' "$1"
             ;;
     esac
+}
+
+# --- Initramfs strip hook helpers (--install-initramfs-hook etc.) ---
+#
+# modulejail's blacklist is a steady-state policy for the real root
+# filesystem. Mainstream initramfs builders (dracut on RHEL/Rocky/Fedora,
+# initramfs-tools on Debian/Ubuntu, mkinitcpio on Arch) all copy
+# /etc/modprobe.d/*.conf into the initramfs cpio at build time. When a
+# kernel upgrade triggers an initramfs rebuild, the then-current
+# blacklist gets frozen into the new kernel's initramfs, and subsequent
+# on-disk edits or full revocation do not update the baked copy. This
+# causes the upgrade-then-stale class of bug (github.com/jnuyens/
+# modulejail issue #19) and creates a boot-bricking risk when kernel
+# upgrades rename storage drivers (mpt2sas -> mpi3mr, etc.).
+#
+# The strip hook removes modulejail-blacklist.conf from the initramfs
+# being built. Security-neutral on the initrd side (no unprivileged
+# users exist before pivot_root, so no LPE surface to defend), and
+# closes the boot-bricking risk.
+
+detect_initramfs_tool() {
+    # Print the detected initramfs builder on stdout, or empty string.
+    # Both the command AND its configuration directory must exist; this
+    # distinguishes "tool is installed and active" from "a helper
+    # subpackage is shipped" (e.g. dracut-install on Debian without
+    # dracut itself being the active builder).
+    #
+    # MODULEJAIL_INITRAMFS_BUILDER overrides detection for test fixtures
+    # (analogous to MODULEJAIL_PROC_MODULES / MODULEJAIL_LOGGER_PATH).
+    # End-user operators leave unset.
+    if [ -n "${MODULEJAIL_INITRAMFS_BUILDER:-}" ]; then
+        printf '%s' "$MODULEJAIL_INITRAMFS_BUILDER"
+        return 0
+    fi
+    if [ -d /usr/lib/dracut/modules.d ] && command -v dracut >/dev/null 2>&1; then
+        printf 'dracut'
+    elif [ -d /etc/initramfs-tools/hooks ] && command -v update-initramfs >/dev/null 2>&1; then
+        printf 'initramfs-tools'
+    elif [ -d /etc/initcpio/install ] && command -v mkinitcpio >/dev/null 2>&1; then
+        printf 'mkinitcpio'
+    fi
+}
+
+# install_initramfs_hook DRY_RUN
+# Writes the strip hook for whichever initramfs builder is detected.
+# Prints the operator-runnable rebuild command afterwards; does NOT
+# rebuild the initramfs itself (sysadmin discipline replaces tool
+# guardrails per project policy - operators schedule the rebuild on
+# their own time, and packaged install scripts forward the same
+# recommendation through dpkg/rpm/pacman output).
+# DRY_RUN=1 prints what would happen without writing anything.
+install_initramfs_hook() {
+    dry_run=$1
+
+    tool=$(detect_initramfs_tool)
+    if [ -z "$tool" ]; then
+        printf 'modulejail: error: no supported initramfs builder detected on this host\n' >&2
+        printf 'modulejail: error: looked for dracut, initramfs-tools, mkinitcpio - none found\n' >&2
+        exit $EX_OSERR
+    fi
+
+    case "$tool" in
+        dracut)
+            target_dir=/usr/lib/dracut/modules.d/99modulejail-strip
+            target_file=$target_dir/module-setup.sh
+            if [ "$dry_run" -eq 1 ]; then
+                printf 'modulejail: dry-run: would write %s (0755)\n' "$target_file"
+                # shellcheck disable=SC2016  # literal backticks intended for human-readable output
+                printf 'modulejail: dry-run: would run `dracut --force --regenerate-all`\n'
+                return 0
+            fi
+            mkdir -p "$target_dir"
+            cat > "$target_file" <<'EOF'
+#!/bin/sh
+# Strip modulejail's blacklist from the initramfs being built.
+# Installed by `modulejail --install-initramfs-hook`. The blacklist
+# is a steady-state policy for the real root filesystem and should
+# not constrain early-boot module loading.
+# See github.com/jnuyens/modulejail issue #19.
+check()   { return 0; }
+depends() { return 0; }
+install() {
+    rm -f "${initdir}/etc/modprobe.d/modulejail-blacklist.conf"
+}
+EOF
+            chmod 0755 "$target_file"
+            printf 'modulejail: wrote dracut module: %s\n' "$target_file"
+            # shellcheck disable=SC2016  # literal backticks intended for human-readable output
+            printf 'modulejail: run `dracut --force --regenerate-all` to apply to existing initramfs images\n'
+            ;;
+        initramfs-tools)
+            target_file=/etc/initramfs-tools/hooks/zz-modulejail-strip
+            if [ "$dry_run" -eq 1 ]; then
+                printf 'modulejail: dry-run: would write %s (0755)\n' "$target_file"
+                # shellcheck disable=SC2016  # literal backticks intended for human-readable output
+                printf 'modulejail: dry-run: would run `update-initramfs -u -k all`\n'
+                return 0
+            fi
+            cat > "$target_file" <<'EOF'
+#!/bin/sh
+# Strip modulejail's blacklist from the initramfs being built.
+# Installed by `modulejail --install-initramfs-hook`. The blacklist
+# is a steady-state policy for the real root filesystem and should
+# not constrain early-boot module loading.
+# See github.com/jnuyens/modulejail issue #19.
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case $1 in
+    prereqs) prereqs; exit 0 ;;
+esac
+rm -f "${DESTDIR}/etc/modprobe.d/modulejail-blacklist.conf"
+EOF
+            chmod 0755 "$target_file"
+            printf 'modulejail: wrote initramfs-tools hook: %s\n' "$target_file"
+            # shellcheck disable=SC2016  # literal backticks intended for human-readable output
+            printf 'modulejail: run `update-initramfs -u -k all` to apply to existing initramfs images\n'
+            ;;
+        mkinitcpio)
+            target_file=/etc/initcpio/install/modulejail-strip
+            pacman_hook=/usr/share/libalpm/hooks/95-modulejail-strip.hook
+            if [ "$dry_run" -eq 1 ]; then
+                printf 'modulejail: dry-run: would write %s (0755)\n' "$target_file"
+                if command -v pacman >/dev/null 2>&1 && [ -d /usr/share/libalpm/hooks ]; then
+                    printf 'modulejail: dry-run: would write %s (0644)\n' "$pacman_hook"
+                fi
+                # shellcheck disable=SC2016  # literal backticks intended for human-readable output
+                printf 'modulejail: dry-run: would run `mkinitcpio -A modulejail-strip -P`\n'
+                return 0
+            fi
+            cat > "$target_file" <<'EOF'
+#!/bin/bash
+# Strip modulejail's blacklist from the initramfs being built.
+# Installed by `modulejail --install-initramfs-hook`. The blacklist
+# is a steady-state policy for the real root filesystem and should
+# not constrain early-boot module loading.
+# See github.com/jnuyens/modulejail issue #19.
+build() {
+    rm -f "${BUILDROOT}/etc/modprobe.d/modulejail-blacklist.conf"
+}
+help() {
+    cat <<HELP
+Strips /etc/modprobe.d/modulejail-blacklist.conf from the initramfs
+cpio at build time. The blacklist is a steady-state policy for the
+real root filesystem; baking it into the initramfs causes upgrade-
+then-stale behavior (see github.com/jnuyens/modulejail issue #19).
+HELP
+}
+EOF
+            chmod 0755 "$target_file"
+            printf 'modulejail: wrote mkinitcpio install hook: %s\n' "$target_file"
+            if command -v pacman >/dev/null 2>&1 && [ -d /usr/share/libalpm/hooks ]; then
+                cat > "$pacman_hook" <<'EOF'
+# pacman trigger for the modulejail-strip mkinitcpio hook.
+# Installed by `modulejail --install-initramfs-hook`. Rebuilds every
+# initramfs with the modulejail-strip hook appended after any kernel
+# install or upgrade.
+# See github.com/jnuyens/modulejail issue #19.
+[Trigger]
+Type = Path
+Operation = Install
+Operation = Upgrade
+Target = usr/lib/modules/*/vmlinuz
+
+[Action]
+Description = Stripping modulejail blacklist from rebuilt initramfs images...
+When = PostTransaction
+Exec = /usr/bin/mkinitcpio -A modulejail-strip -P
+NeedsTargets
+EOF
+                chmod 0644 "$pacman_hook"
+                printf 'modulejail: wrote pacman trigger: %s\n' "$pacman_hook"
+            fi
+            # shellcheck disable=SC2016  # literal backticks intended for human-readable output
+            printf 'modulejail: run `mkinitcpio -A modulejail-strip -P` to apply to existing initramfs images\n'
+            ;;
+    esac
+
+    printf 'modulejail: initramfs strip hook installed (detected builder: %s)\n' "$tool"
+}
+
+# uninstall_initramfs_hook DRY_RUN
+# Removes every known hook file path regardless of which builder is
+# currently detected (handles distro migrations). Prints the operator-
+# runnable rebuild command afterwards; does NOT rebuild the initramfs
+# itself. DRY_RUN=1 prints what would happen without removing anything.
+uninstall_initramfs_hook() {
+    dry_run=$1
+
+    removed=0
+    for path in \
+        /usr/lib/dracut/modules.d/99modulejail-strip/module-setup.sh \
+        /etc/initramfs-tools/hooks/zz-modulejail-strip \
+        /etc/initcpio/install/modulejail-strip \
+        /usr/lib/initcpio/install/modulejail-strip \
+        /usr/share/libalpm/hooks/95-modulejail-strip.hook
+    do
+        if [ -e "$path" ]; then
+            if [ "$dry_run" -eq 1 ]; then
+                printf 'modulejail: dry-run: would remove %s\n' "$path"
+            else
+                rm -f "$path"
+                printf 'modulejail: removed %s\n' "$path"
+            fi
+            removed=1
+        fi
+    done
+
+    # Clean up the empty dracut module directory if it remains.
+    if [ "$dry_run" -eq 0 ] && [ -d /usr/lib/dracut/modules.d/99modulejail-strip ]; then
+        rmdir /usr/lib/dracut/modules.d/99modulejail-strip 2>/dev/null || true
+    fi
+
+    if [ "$removed" -eq 0 ]; then
+        printf 'modulejail: no installed initramfs strip hooks found (already uninstalled, or never installed)\n'
+        return 0
+    fi
+
+    printf 'modulejail: regenerate initramfs to refresh existing images:\n'
+    printf '  dracut           --force --regenerate-all\n'
+    printf '  update-initramfs -u -k all\n'
+    printf '  mkinitcpio       -P\n'
+    printf 'modulejail: initramfs strip hook uninstalled\n'
+}
+
+# --- Self-update helper (--self-update) ---
+#
+# Fetches the latest stable tag from the GitHub releases API, downloads
+# the matching `modulejail` script, preserves operator edits to the
+# SYSADMIN WHITELIST region (lines between `# === SYSADMIN WHITELIST ===`
+# and `# === END SYSADMIN WHITELIST ===`), and atomically replaces the
+# running script.
+#
+# Threat-model notes:
+# - Trust anchor is HTTPS + GitHub. The fetched bytes are NOT signed
+#   beyond TLS. Operators with a stricter trust model should rely on
+#   their distro package manager (.deb / .rpm / AUR) instead. The
+#   `--dry-run` mode displays the sha256 of the new script before any
+#   write, so the operator can compare against the release page.
+# - External whitelist files (--whitelist-file PATH or the default
+#   /etc/modulejail/whitelist.conf) are NOT touched. They live outside
+#   the script.
+# - If the script's path is owned by a package manager (dpkg/rpm/pacman),
+#   self-update will overwrite the package-managed file. A warning is
+#   printed; operators should prefer `apt upgrade` / `dnf upgrade` /
+#   `pacman -Syu` on packaged systems.
+
+self_update() {
+    auto_yes=$1
+    dry_run=$2
+
+    target_script=$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")
+
+    # Pick a fetcher.
+    if command -v curl >/dev/null 2>&1; then
+        fetcher_kind=curl
+    elif command -v wget >/dev/null 2>&1; then
+        fetcher_kind=wget
+    else
+        printf 'modulejail: error: --self-update requires curl or wget\n' >&2
+        exit $EX_OSERR
+    fi
+
+    fetch_url() {
+        # fetch_url URL OUTPATH -> 0 on success, non-zero on failure
+        case "$fetcher_kind" in
+            curl) curl -fsSL --max-time 30 -o "$2" "$1" ;;
+            wget) wget -q -T 30 -O "$2" "$1" ;;
+        esac
+    }
+
+    # Resolve latest stable tag from GitHub releases API.
+    api_url='https://api.github.com/repos/jnuyens/modulejail/releases/latest'
+    tag_file=$(mktemp "${TMPDIR:-/tmp}/modulejail-update.XXXXXX")
+    if ! fetch_url "$api_url" "$tag_file"; then
+        printf 'modulejail: error: cannot fetch %s\n' "$api_url" >&2
+        rm -f "$tag_file"
+        exit $EX_OSERR
+    fi
+    latest_tag=$(sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\(v[0-9][^"]*\)".*/\1/p' "$tag_file" | head -1)
+    rm -f "$tag_file"
+    if [ -z "$latest_tag" ]; then
+        printf 'modulejail: error: could not parse latest tag from GitHub releases API\n' >&2
+        exit $EX_OSERR
+    fi
+
+    current="v$VERSION"
+    if [ "$latest_tag" = "$current" ]; then
+        printf 'modulejail: already at latest stable: %s\n' "$current"
+        exit $EX_OK
+    fi
+
+    # Download the new script.
+    new_url="https://raw.githubusercontent.com/jnuyens/modulejail/${latest_tag}/modulejail"
+    new_tmp=$(mktemp "${TMPDIR:-/tmp}/modulejail-new.XXXXXX")
+    if ! fetch_url "$new_url" "$new_tmp"; then
+        printf 'modulejail: error: cannot fetch %s\n' "$new_url" >&2
+        rm -f "$new_tmp"
+        exit $EX_OSERR
+    fi
+
+    # Sanity-check the downloaded bytes look like a modulejail script.
+    if ! head -1 "$new_tmp" | grep -q '^#!/bin/sh'; then
+        printf 'modulejail: error: downloaded file does not start with a /bin/sh shebang\n' >&2
+        rm -f "$new_tmp"
+        exit $EX_DATAERR
+    fi
+    if ! grep -q "^VERSION='" "$new_tmp"; then
+        printf 'modulejail: error: downloaded file missing VERSION= line\n' >&2
+        rm -f "$new_tmp"
+        exit $EX_DATAERR
+    fi
+
+    # Compute SHA-256 of downloaded file for transparency.
+    if command -v sha256sum >/dev/null 2>&1; then
+        new_sha=$(sha256sum "$new_tmp" | awk '{print $1}')
+    elif command -v shasum >/dev/null 2>&1; then
+        new_sha=$(shasum -a 256 "$new_tmp" | awk '{print $1}')
+    else
+        new_sha='(no sha256sum/shasum available on host)'
+    fi
+
+    # Preserve operator-edited SYSADMIN WHITELIST region.
+    start_marker='# === SYSADMIN WHITELIST ==='
+    end_marker='# === END SYSADMIN WHITELIST ==='
+    current_region=$(mktemp "${TMPDIR:-/tmp}/modulejail-region.XXXXXX")
+    awk -v start="$start_marker" -v end="$end_marker" '
+        $0 == start { in_region=1 }
+        in_region   { print }
+        $0 == end   { in_region=0 }
+    ' "$target_script" > "$current_region"
+
+    splice_status='preserved (spliced from current script)'
+    if [ ! -s "$current_region" ]; then
+        splice_status='NOT preserved (current script has no SYSADMIN WHITELIST markers)'
+        rm -f "$current_region"
+        current_region=''
+    elif ! grep -qF "$start_marker" "$new_tmp" || ! grep -qF "$end_marker" "$new_tmp"; then
+        splice_status='NOT preserved (downloaded script has no SYSADMIN WHITELIST markers)'
+        rm -f "$current_region"
+        current_region=''
+    fi
+
+    spliced_tmp=$(mktemp "${TMPDIR:-/tmp}/modulejail-spliced.XXXXXX")
+    if [ -n "$current_region" ]; then
+        awk -v start="$start_marker" -v end="$end_marker" -v region_file="$current_region" '
+            $0 == start {
+                while ((getline line < region_file) > 0) print line
+                close(region_file)
+                skip = 1
+                next
+            }
+            $0 == end {
+                skip = 0
+                next
+            }
+            !skip { print }
+        ' "$new_tmp" > "$spliced_tmp"
+        rm -f "$current_region"
+    else
+        cat "$new_tmp" > "$spliced_tmp"
+    fi
+    rm -f "$new_tmp"
+
+    # Detect packaged install for an informative warning.
+    # Trailing `|| true` is load-bearing on every branch: dpkg-query, rpm,
+    # and pacman all exit non-zero when the queried path is NOT owned by a
+    # package, and the resulting non-zero exit from the assignment-via-
+    # command-substitution trips `set -e` at the top of the script,
+    # silently aborting self-update mid-flight.
+    pkg_warning=''
+    if command -v dpkg-query >/dev/null 2>&1; then
+        pkg=$( { dpkg-query -S "$target_script" 2>/dev/null || true; } | cut -d: -f1 | head -1)
+        [ -n "$pkg" ] && pkg_warning="dpkg package: $pkg"
+    fi
+    if [ -z "$pkg_warning" ] && command -v rpm >/dev/null 2>&1; then
+        pkg=$(rpm -qf "$target_script" 2>/dev/null || true)
+        # rpm -qf prints "file X is not owned by any package" (spaces + "not owned")
+        # or a single NVR string for owned files. The "not owned" substring is
+        # the discriminator; checking it alone is enough.
+        case "$pkg" in
+            ''|*'not owned'*) : ;;
+            *) pkg_warning="rpm package: $pkg" ;;
+        esac
+    fi
+    if [ -z "$pkg_warning" ] && command -v pacman >/dev/null 2>&1; then
+        pkg=$( { pacman -Qoq "$target_script" 2>/dev/null || true; } | head -1)
+        [ -n "$pkg" ] && pkg_warning="pacman package: $pkg"
+    fi
+
+    # Preview
+    printf 'modulejail: self-update preview:\n'
+    printf '  current version: %s\n' "$current"
+    printf '  latest version:  %s\n' "$latest_tag"
+    printf '  source URL:      %s\n' "$new_url"
+    printf '  target path:     %s\n' "$target_script"
+    printf '  sha256 of new:   %s\n' "$new_sha"
+    printf '  SYSADMIN WHITELIST region: %s\n' "$splice_status"
+    printf '  external whitelist file (--whitelist-file or %s): not touched\n' "$DEFAULT_WHITELIST_FILE"
+    if [ -n "$pkg_warning" ]; then
+        printf '\n'
+        printf 'modulejail: NOTE: %s is managed by %s.\n' "$target_script" "$pkg_warning"
+        printf 'modulejail: NOTE: prefer your package manager for upgrades; self-update will be\n'
+        printf 'modulejail: NOTE: overwritten by the next package transaction.\n'
+    fi
+
+    if [ "$dry_run" -eq 1 ]; then
+        printf '\nmodulejail: dry-run: would replace %s with the above\n' "$target_script"
+        rm -f "$spliced_tmp"
+        return 0
+    fi
+
+    if [ "$auto_yes" -ne 1 ]; then
+        # Without -y / --yes, prompt interactively. Pick the right input
+        # source: stdin if it's a tty, otherwise /dev/tty if it's actually
+        # openable (the `[ -e ]` test is not enough - /dev/tty is always
+        # present in /dev/ but only opens when there is a controlling
+        # terminal). When neither is available (postinst, cron,
+        # systemd-run, ssh non-interactive), refuse and tell the operator
+        # to pass -y / --yes - silent self-update from a non-interactive
+        # context is not a safe default.
+        if [ -t 0 ]; then
+            input_source='stdin'
+        elif (: < /dev/tty) 2>/dev/null; then
+            input_source='tty'
+        else
+            input_source='none'
+        fi
+
+        if [ "$input_source" = 'none' ]; then
+            printf '\nmodulejail: error: non-interactive shell; pass -y / --yes to apply\n' >&2
+            rm -f "$spliced_tmp"
+            exit $EX_USAGE
+        fi
+
+        printf '\nApply this update? [y/N] '
+        if [ "$input_source" = 'tty' ]; then
+            read -r response < /dev/tty || response=''
+        else
+            read -r response || response=''
+        fi
+        case "$response" in
+            [yY]|[yY][eE][sS]) ;;
+            *)
+                printf 'modulejail: self-update cancelled by operator\n'
+                rm -f "$spliced_tmp"
+                return 0
+                ;;
+        esac
+    fi
+
+    # Atomic replace via rename(2) within the target directory.
+    target_dir=$(dirname "$target_script")
+    if ! final_tmp=$(mktemp "${target_dir}/.modulejail.new.XXXXXX" 2>/dev/null); then
+        printf 'modulejail: error: cannot create temp file in %s (need write access)\n' "$target_dir" >&2
+        rm -f "$spliced_tmp"
+        exit $EX_CANTCREAT
+    fi
+    cat "$spliced_tmp" > "$final_tmp"
+    chmod 0755 "$final_tmp"
+    mv "$final_tmp" "$target_script"
+    rm -f "$spliced_tmp"
+
+    printf '\nmodulejail: self-update applied: %s -> %s\n' "$current" "$latest_tag"
+    printf 'modulejail: target: %s\n' "$target_script"
 }
 
 # --- Reproducible invocation string ---
@@ -332,6 +851,22 @@ while [ $# -gt 0 ]; do
             [ -n "$OUTPUT_FORMAT" ] || { printf 'modulejail: error: --output-format= requires non-empty argument (expected json or logfmt)\n' >&2; exit $EX_USAGE; }
             shift
             ;;
+        --install-initramfs-hook)
+            INITRAMFS_HOOK_ACTION='install'
+            shift
+            ;;
+        --uninstall-initramfs-hook)
+            INITRAMFS_HOOK_ACTION='uninstall'
+            shift
+            ;;
+        -y|--yes)
+            ASSUME_YES=1
+            shift
+            ;;
+        --self-update)
+            SELF_UPDATE=1
+            shift
+            ;;
         -h|--help)
             usage
             exit $EX_OK
@@ -356,6 +891,37 @@ while [ $# -gt 0 ]; do
             ;;
     esac
 done
+
+# --- Self-update dispatch ---
+# Mutually exclusive with --install/--uninstall-initramfs-hook (different
+# top-level actions). --dry-run shows the preview without writing;
+# --yes applies the download.
+if [ "$SELF_UPDATE" -eq 1 ] && [ -n "$INITRAMFS_HOOK_ACTION" ]; then
+    printf 'modulejail: error: --self-update and --install/--uninstall-initramfs-hook are mutually exclusive\n' >&2
+    exit $EX_USAGE
+fi
+if [ "$SELF_UPDATE" -eq 1 ]; then
+    self_update "$ASSUME_YES" "$DRY_RUN"
+    exit $EX_OK
+fi
+
+# --- Initramfs hook install/uninstall dispatch ---
+# When --install-initramfs-hook or --uninstall-initramfs-hook is set,
+# take that action and exit. The action is orthogonal to blacklist
+# generation; all other flags (profile, whitelist, etc.) are ignored
+# in this mode. --dry-run is honored as "show what would happen."
+if [ -n "$INITRAMFS_HOOK_ACTION" ]; then
+    if [ "$(id -u)" -ne 0 ] && [ "$DRY_RUN" -eq 0 ]; then
+        printf 'modulejail: error: --%s-initramfs-hook requires root (writes to /usr/lib and /etc)\n' \
+            "$INITRAMFS_HOOK_ACTION" >&2
+        exit $EX_NOPERM
+    fi
+    case "$INITRAMFS_HOOK_ACTION" in
+        install)   install_initramfs_hook   "$DRY_RUN" ;;
+        uninstall) uninstall_initramfs_hook "$DRY_RUN" ;;
+    esac
+    exit $EX_OK
+fi
 
 # --- Validate profile ---
 case "$profile" in
@@ -677,13 +1243,31 @@ list_whitelist() {
 #                     reads correctly. (Previously this branch was dead
 #                     code under set -eu because awk's non-zero exit
 #                     aborted the shell at the awk line before we could remap.)
-#   77 (EX_NOPERM)  - file is group- or world-writable
+#   77 (EX_NOPERM)  - file is not owned by root, or is group- or world-writable
 parse_whitelist_file() {
     _wf="$1"
     [ -n "$_wf" ] || return 0   # no file passed; no-op
     if [ ! -r "$_wf" ]; then
         printf 'modulejail: error: whitelist file %s does not exist or is not readable\n' "$_wf" >&2
         exit $EX_NOINPUT
+    fi
+    # Ownership check: file must be owned by root (uid 0) OR by the
+    # current user. A file owned by a third uid is a privilege-boundary
+    # crossing - if modulejail runs as root, a non-root owner could have
+    # injected WHITELIST entries that root would then trust. (The
+    # current-uid carve-out lets a developer run modulejail against a
+    # whitelist file in their own home for testing without raising the
+    # bar to "must be /etc/modulejail/whitelist.conf".)
+    # Use stat with GNU-form first, BSD-form fallback (macOS, *BSD).
+    _owner=$(stat -c '%u' "$_wf" 2>/dev/null || stat -f '%u' "$_wf" 2>/dev/null || echo '')
+    if [ -z "$_owner" ]; then
+        printf 'modulejail: error: could not stat whitelist file %s\n' "$_wf" >&2
+        exit $EX_OSERR
+    fi
+    _current_uid=$(id -u)
+    if [ "$_owner" != "0" ] && [ "$_owner" != "$_current_uid" ]; then
+        printf 'modulejail: error: whitelist file %s is owned by uid %s; must be owned by root (uid 0) or by you (uid %s); run '\''sudo chown root:root %s'\'' and retry\n' "$_wf" "$_owner" "$_current_uid" "$_wf" >&2
+        exit $EX_NOPERM
     fi
     # Permission check: refuse if group- or world-writable. Use stat with
     # GNU-form first, BSD-form fallback (macOS, *BSD). The result is an
@@ -703,7 +1287,7 @@ parse_whitelist_file() {
     _other_digit=$(printf '%s' "$_last3" | cut -c3)
     case "$_group_digit$_other_digit" in
         *[2367]*)
-            printf 'modulejail: error: whitelist file %s must not be group- or world-writable; run '\''chmod go-w %s'\'' and retry\n' "$_wf" "$_wf" >&2
+            printf 'modulejail: error: whitelist file %s must not be group- or world-writable; run '\''sudo chmod go-w %s'\'' and retry\n' "$_wf" "$_wf" >&2
             exit $EX_NOPERM
             ;;
     esac
