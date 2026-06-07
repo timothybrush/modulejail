@@ -5,6 +5,125 @@ All notable changes to ModuleJail are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-06-07
+
+Feature release. Three operator-reported requests close together,
+plus the packaging and docs that make them safe to fleet-deploy.
+
+### Added
+
+- `--install-initramfs-hook` / `--uninstall-initramfs-hook`
+  ([#19](https://github.com/jnuyens/modulejail/issues/19)). Detects
+  the active initramfs builder on the host (dracut on RHEL/Rocky/
+  Fedora; initramfs-tools on Debian/Ubuntu; mkinitcpio on Arch) and
+  installs a small per-distro hook that strips
+  `/etc/modprobe.d/modulejail-blacklist.conf` from rebuilt initramfs
+  cpios. Closes the upgrade-then-stale-blacklist class of bug where
+  a kernel-package upgrade bakes the modulejail blacklist into the
+  new kernel's initramfs and subsequent on-disk edits or full
+  revocation do not take effect at early boot. Reported by
+  @sometimegithubuser on Rocky Linux 10.2; reproduced independently
+  on Rocky 9.7, Debian 13.4, and Arch (kernel 7.0.9). Prints the
+  operator-runnable rebuild command after writing the hook; does
+  NOT auto-rebuild the initramfs (sysadmin discipline replaces tool
+  guardrails). Pair with `--dry-run` to preview the file path that
+  would be written. Requires root.
+- `--self-update` ([#20](https://github.com/jnuyens/modulejail/issues/20)).
+  Fetches the latest stable tag from the GitHub releases API,
+  downloads the matching script, splices the operator-edited
+  `SYSADMIN WHITELIST` region (marker-bracketed) from the current
+  script into the downloaded one, and atomically replaces the
+  running script. Default behavior prompts interactively for
+  confirmation; `-y` / `--yes` skips the prompt; non-tty invocation
+  without `--yes` refuses with exit code 64 (cron / postinst /
+  systemd-run must pass `--yes` explicitly). `--dry-run` previews
+  the SHA-256 of the downloaded bytes, the splice status, and the
+  target path without touching anything. Detects packaged installs
+  (`dpkg-query -S` / `rpm -qf` / `pacman -Qo`) and prints a warning
+  that `apt upgrade` / `dnf upgrade` / `pacman -Syu` is preferred on
+  packaged hosts. External whitelist files (`--whitelist-file PATH`
+  or the default `/etc/modulejail/whitelist.conf`) are not read or
+  touched. Requires `curl` or `wget`. Requested by @Bundy01.
+- `mmc_core` + `mmc_block` to `BASELINE_DESKTOP`
+  ([#16](https://github.com/jnuyens/modulejail/issues/16)). SD card
+  readers on laptops and workstations no longer need a manual
+  whitelist entry to work after a modulejail run. Requested by
+  @fonic.
+- `MODULEJAIL_INITRAMFS_BUILDER` test-only environment variable
+  (analogous to `MODULEJAIL_LOGGER_PATH`, `MODULEJAIL_PROC_MODULES`)
+  forcing the initramfs builder detection in the dry-run-mode tests.
+- `-y` short alias for `--yes`.
+- PATH augmentation at script start (`/usr/sbin`, `/sbin` appended
+  if absent) so non-root callers running `--install-initramfs-hook
+  --dry-run` find `update-initramfs` on Debian and `dracut` on RHEL
+  family (both binaries live under `/usr/sbin/`, which is omitted
+  from the default non-root PATH on those distros).
+
+### Changed
+
+- `parse_whitelist_file` now refuses files whose owner is neither
+  root (uid 0) nor the invoking user. A non-root owner can write to
+  a 0600 file, which would let them inject WHITELIST entries that
+  modulejail (running as root) trusts. The error message includes
+  `sudo chown root:root <path>` with the actual file path. The
+  existing group/world-writable check is unchanged but its error
+  message now prefixes the fix with `sudo`.
+- README tagline and "Explicit limitations" wording dropped the
+  absolute "no initramfs changes" claim; initramfs handling is now
+  opt-in via `--install-initramfs-hook` and automatic on packaged
+  installs.
+
+### Packaging
+
+- `.deb`: `DEBIAN/postinst` calls `modulejail --install-initramfs-hook`
+  on configure; `DEBIAN/prerm` calls `--uninstall-initramfs-hook` on
+  remove/deconfigure (skipped on upgrade). Both best-effort: failures
+  warn but do not abort the dpkg transaction.
+- `.rpm`: `%post` and `%preun` scriptlets call the same flags; the
+  uninstall scriptlet is guarded by `$1 == 0` so it runs only on full
+  uninstall, not on upgrade.
+- AUR: new `modulejail.install` pacman `.install` file with
+  `post_install` / `post_upgrade` / `pre_remove` functions calling
+  the same `--install`/`--uninstall-initramfs-hook` flags. PKGBUILD
+  `install=$pkgname.install` directive added; `optdepends` extended
+  with `mkinitcpio` and `curl`. `scripts/publish-aur.sh` ships
+  `modulejail.install` to the AUR repo on next publish.
+- All packaging paths share one source of truth for hook content:
+  the heredocs inside the modulejail script itself.
+
+### Docs
+
+- New `docs/DEFENSE-IN-DEPTH.md` section "Where ModuleJail's policy
+  applies (and where it does not)" explaining the threat-model
+  argument behind stripping the modulejail blacklist from the
+  initramfs: no unprivileged attacker exists during the initrd
+  phase, so the defense gain of "keep blacklist active in initramfs"
+  is zero, while the cost is a real boot-bricking risk on kernel-
+  upgrade-driven module rename (`mpt2sas` -> `mpi3mr` on some LSI
+  controllers, similar drift on some Adaptec / network / nvme-
+  fabrics drivers). Promised to Jérémy Lal during the v1.4 packaging
+  consultation.
+- README options reference table extended with `--install-initramfs-
+  hook`, `--uninstall-initramfs-hook`, `--self-update`, and `-y` /
+  `--yes`. `--whitelist-file` row updated to mention the root-or-
+  current-uid ownership requirement.
+
+### Credit
+
+- @sometimegithubuser
+  ([#19](https://github.com/jnuyens/modulejail/issues/19)) for the
+  Rocky Linux 10.2 upgrade-stale-blacklist bug report and the
+  `lsinitrd` confirmation that pinned down the dracut bake-
+  blacklist-into-cpio behavior.
+- @Bundy01
+  ([#20](https://github.com/jnuyens/modulejail/issues/20)) for the
+  `--self-update` feature request.
+- @fonic ([#16](https://github.com/jnuyens/modulejail/issues/16))
+  for the SD card reader desktop-profile addition request.
+- Jérémy Lal (@kapouer) for the Debian packaging consultation that
+  motivated the threat-model section in `docs/DEFENSE-IN-DEPTH.md`.
+- Adam Bambuch (@tjmnmk) for co-maintaining `modulejail-git` on AUR.
+
 ## [1.3.6] - 2026-05-30
 
 Hotfix release. A third bug in v1.3.5's `--verbose-logging` install
