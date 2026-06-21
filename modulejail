@@ -1101,6 +1101,19 @@ if [ "$ON_NIXOS" -eq 1 ] && [ "$output" = "/etc/modprobe.d/modulejail-blacklist.
     output=/etc/nixos/modulejail-blacklist.nix
 fi
 
+# --- Validate output path extension matches mode ---
+# Writing Nix syntax to a .conf file (or modprobe.d lines to a .nix file)
+# results in a broken-but-silent configuration.
+if [ "$ON_NIXOS" -eq 1 ]; then
+    case "$output" in
+        *.conf) printf 'modulejail: error: NixOS mode but output path ends in .conf; use .nix extension\n' >&2; exit $EX_USAGE ;;
+    esac
+else
+    case "$output" in
+        *.nix) printf 'modulejail: error: non-NixOS mode but output path ends in .nix; use .conf extension\n' >&2; exit $EX_USAGE ;;
+    esac
+fi
+
 # --- Pre-flight: reject $output that is (or could become) a directory. ---
 # Without this, `-o /etc/modprobe.d` (or any existing directory — easy slip
 # with shell completion or a copy-paste from docs) would pass dirname, pass
