@@ -19,7 +19,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install shellcheck
         run: sudo apt-get update -qq && sudo apt-get install -y shellcheck
       - name: shellcheck --shell=sh
@@ -35,7 +35,7 @@ jobs:
     needs: lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Run arch fixture
         run: sh tests/run-fixtures.sh --only-container arch
 
@@ -43,7 +43,7 @@ jobs:
     needs: lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Run alpine fixture
         run: sh tests/run-fixtures.sh --only-container alpine
 
@@ -51,7 +51,7 @@ jobs:
     needs: lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Run opensuse fixture
         run: sh tests/run-fixtures.sh --only-container opensuse
 
@@ -59,7 +59,7 @@ jobs:
     needs: lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install case prerequisites
         # mandoc is consumed by the manpage-no-groff-warnings.sh case
         # (added in v1.4.3 to gate the .URL-class lintian regression).
