@@ -27,6 +27,7 @@ jobs:
           shellcheck --shell=sh \
             modulejail \
             tests/run-fixtures.sh \
+            tests/run-ssh-hosts.sh \
             tests/lib/*.sh \
             tests/cases/*.sh \
             scripts/*.sh

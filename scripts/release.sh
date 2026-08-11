@@ -233,6 +233,21 @@ if [ "$FROM_STEP" -le 0 ]; then
         printf 'release.sh: re-run tests/run-fixtures.sh --only-host-local to see the failure\n' >&2
         exit $EX_SOFTWARE
     fi
+
+    # Optional real-kernel gate on the Proxmox test VMs (Fedora/Rocky/Debian
+    # live kernels). The gate is environment-specific (site hostnames/IPs), so
+    # it lives at scripts/local/vm-release-gate.sh, which is gitignored. When
+    # present it must pass; when absent the release proceeds (the CI container
+    # fixtures already cover the userland axis).
+    if [ -x scripts/local/vm-release-gate.sh ]; then
+        printf 'release.sh: running local real-kernel VM gate...\n'
+        if ! scripts/local/vm-release-gate.sh; then
+            printf 'release.sh: error: real-kernel VM gate FAILED\n' >&2
+            exit $EX_SOFTWARE
+        fi
+    else
+        printf 'release.sh: no scripts/local/vm-release-gate.sh; skipping real-kernel VM gate\n'
+    fi
 fi
 
 printf 'release.sh: preconditions OK\n'
