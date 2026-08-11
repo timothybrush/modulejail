@@ -55,6 +55,14 @@ jobs:
       - name: Run opensuse fixture
         run: sh tests/run-fixtures.sh --only-container opensuse
 
+  fedora:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Run fedora fixture
+        run: sh tests/run-fixtures.sh --only-container fedora
+
   host-local:
     needs: lint
     runs-on: ubuntu-latest

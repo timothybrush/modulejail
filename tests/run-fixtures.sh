@@ -7,7 +7,7 @@
 #       Default mode. Discovers and runs every host-local case under
 #       tests/cases/*.sh. Additionally, if docker or podman is present,
 #       builds and runs the per-distro fixture containers (arch, alpine,
-#       opensuse). On a host without a container runtime, the host-local
+#       opensuse, fedora). On a host without a container runtime, the host-local
 #       cases still run; a stderr banner names the missing runtime.
 #
 #   tests/run-fixtures.sh --filter PATTERN
@@ -17,7 +17,7 @@
 #
 #   tests/run-fixtures.sh --only-container DISTRO
 #       Restricts execution to a single fixture-tier container; DISTRO
-#       must be one of: arch, alpine, opensuse. Builds
+#       must be one of: arch, alpine, opensuse, fedora. Builds
 #       tests/fixtures/$DISTRO/Dockerfile and runs the resulting image.
 #       Does NOT run the host-local case layer or the other two
 #       containers. Intended for CI matrix per-axis invocation so each
@@ -38,7 +38,7 @@
 #   1   at least one selected case FAILED (in either layer).
 #   64  bad command-line argument: --filter without PATTERN,
 #       --only-container without DISTRO, --only-container DISTRO outside
-#       the allowlist {arch, alpine, opensuse}, more than one of
+#       the allowlist {arch, alpine, opensuse, fedora}, more than one of
 #       --filter / --only-container / --only-host-local passed together,
 #       --only-container invoked on a host with neither docker nor podman
 #       in PATH, or any unknown flag.
@@ -120,13 +120,13 @@ if [ "$FLAG_COUNT" -gt 1 ]; then
 fi
 
 # Allowlist DISTRO so an attacker-controlled value cannot reach the
-# docker invocation (T-06-07). Anything outside {arch, alpine, opensuse}
+# docker invocation (T-06-07). Anything outside {arch, alpine, opensuse, fedora}
 # exits 64 BEFORE the dispatch fork.
 if [ -n "$ONLY_CONTAINER" ]; then
     case "$ONLY_CONTAINER" in
-        arch|alpine|opensuse) ;;
+        arch|alpine|opensuse|fedora) ;;
         *)
-            printf 'tests/run-fixtures.sh: --only-container DISTRO must be one of: arch alpine opensuse\n' >&2
+            printf 'tests/run-fixtures.sh: --only-container DISTRO must be one of: arch alpine opensuse fedora\n' >&2
             exit 64
             ;;
     esac
@@ -287,7 +287,7 @@ fi
 # --- Container layer (only when a runtime is present) --------------------
 if [ -n "$RUNTIME" ]; then
     printf '\nmodulejail tests: using %s for container matrix\n' "$RUNTIME"
-    for distro in arch alpine opensuse; do
+    for distro in arch alpine opensuse fedora; do
         TOTAL=$((TOTAL + 1))
         img=modulejail-fixture-$distro
         printf '\n== Building %s fixture ==\n' "$distro"
