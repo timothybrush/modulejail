@@ -217,11 +217,15 @@ if [ "$ONLY_HOST_LOCAL" = 1 ]; then
     for case_file in $HOST_CASES; do
         TOTAL=$((TOTAL + 1))
         printf '\n-- %s --\n' "$case_file"
-        if sh "$case_file"; then
-            : # case prints its own [name] PASS line
-        else
-            FAIL=$((FAIL + 1))
-        fi
+        set +e
+        sh "$case_file"
+        rc=$?
+        set -e
+        case $rc in
+            0)  : ;;                          # case prints its own [name] PASS line
+            77) SKIP=$((SKIP + 1)) ;;         # autoconf/TAP "skip" convention
+            *)  FAIL=$((FAIL + 1)) ;;
+        esac
     done
     if [ "$FAIL" -gt 0 ]; then
         printf '\nmodulejail tests: %d/%d case(s) FAILED.\n' "$FAIL" "$TOTAL" >&2
