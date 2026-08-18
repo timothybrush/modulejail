@@ -53,6 +53,8 @@ NO_SYSLOG_LOGGING=''
 USE_LOGGER=''
 FAIL_ON_MODULE_LOAD=0
 VERBOSE_LOGGING=0
+WARN_ONLY=0
+MODPROBE_PATH=''
 DRY_RUN=0
 QUIET=0
 VERBOSE=0
@@ -62,7 +64,7 @@ ASSUME_YES=0
 SELF_UPDATE=0
 # GEN_INTENT: set to 1 by the parser when any generation-defining flag
 # (-p, -o, --whitelist-file, --no-whitelist-file, --no-syslog-logging,
-# -f, --verbose-logging, --output-format) is passed. Lets a combined
+# -f, --verbose-logging, --warn-only, --output-format) is passed. Lets a combined
 # --install-initramfs-hook compose with generation, while a bare hook
 # call (the packaged postinst path) stays hook-only.
 GEN_INTENT=0
@@ -263,6 +265,16 @@ usage() {
     printf '                    argv[0] (read from /proc/$PPID/...). Requires\n'
     printf '                    /usr/bin/logger (mutually exclusive with\n'
     printf '                    --no-syslog-logging).\n'
+    printf '  --warn-only       Permissive audit mode. Emit install lines that log a\n'
+    printf '                    "would-block: <mod>" event to syslog (tag '\''modulejail'\'')\n'
+    printf '                    and then load the module anyway via\n'
+    # shellcheck disable=SC2016  # backtick is literal help text, not a subshell
+    printf '                    `modprobe --ignore-install`. Nothing is actually\n'
+    printf '                    blocked, so a host stays fully functional while you\n'
+    printf '                    observe what an enforcing run would block. Requires\n'
+    printf '                    /usr/bin/logger and modprobe. Mutually exclusive with\n'
+    printf '                    -f/--fail-on-module-load and --no-syslog-logging;\n'
+    printf '                    composes with --verbose-logging.\n'
     printf '  --dry-run         Compute the would-be blacklist and print a summary to\n'
     printf '                    stdout; do NOT write the output file or touch\n'
     printf '                    /etc/modprobe.d/. Header is rerouted to stderr.\n'
@@ -893,6 +905,11 @@ while [ $# -gt 0 ]; do
             GEN_INTENT=1
             shift
             ;;
+        --warn-only)
+            WARN_ONLY=1
+            GEN_INTENT=1
+            shift
+            ;;
         --dry-run)
             # shellcheck disable=SC2034
             DRY_RUN=1
@@ -965,8 +982,8 @@ done
 # The variants below (silent /bin/true, /bin/false return, verbose context) are
 # not yet wired up on the NixOS emitter; reject explicitly rather than silent no-op.
 if [ "$ON_NIXOS" -eq 1 ]; then
-    if [ "${NO_SYSLOG_LOGGING:-0}" -eq 1 ] || [ "${FAIL_ON_MODULE_LOAD:-0}" -eq 1 ] || [ "${VERBOSE_LOGGING:-0}" -eq 1 ]; then
-        printf 'modulejail: error: --no-syslog-logging, -f/--fail-on-module-load, and --verbose-logging are not yet supported on NixOS.\n' >&2
+    if [ "${NO_SYSLOG_LOGGING:-0}" -eq 1 ] || [ "${FAIL_ON_MODULE_LOAD:-0}" -eq 1 ] || [ "${VERBOSE_LOGGING:-0}" -eq 1 ] || [ "${WARN_ONLY:-0}" -eq 1 ]; then
+        printf 'modulejail: error: --no-syslog-logging, -f/--fail-on-module-load, --verbose-logging, and --warn-only are not yet supported on NixOS.\n' >&2
         printf 'modulejail: error: The default NixOS install line uses the logger form (syslog tag "modulejail").\n' >&2
         printf 'modulejail: error: File an issue at https://github.com/jnuyens/modulejail/issues if you need these on NixOS.\n' >&2
         exit $EX_USAGE
@@ -1050,6 +1067,21 @@ if [ -n "$NO_SYSLOG_LOGGING" ] && [ "$VERBOSE_LOGGING" -eq 1 ]; then
     exit $EX_USAGE
 fi
 
+# --- Reject --warn-only against contradictory install-line flags (#30) ---
+# --warn-only emits a permissive install line that LOADS the module after
+# logging a "would-block" audit event. That is the opposite of
+# --fail-on-module-load (make modprobe fail loudly) and cannot coexist with
+# --no-syslog-logging (the audit line IS the point; without it the file is a
+# no-op). --verbose-logging composes fine (it only enriches the audit line).
+if [ "$WARN_ONLY" -eq 1 ] && [ "$FAIL_ON_MODULE_LOAD" -eq 1 ]; then
+    printf 'modulejail: error: --warn-only and -f/--fail-on-module-load are mutually exclusive (permissive audit vs. loud failure)\n' >&2
+    exit $EX_USAGE
+fi
+if [ "$WARN_ONLY" -eq 1 ] && [ -n "$NO_SYSLOG_LOGGING" ]; then
+    printf 'modulejail: error: --warn-only and --no-syslog-logging are mutually exclusive (the would-block audit line is the whole point of warn-only)\n' >&2
+    exit $EX_USAGE
+fi
+
 # --- Validate --output-format closed set ---
 if [ -n "$OUTPUT_FORMAT" ]; then
     case "$OUTPUT_FORMAT" in
@@ -1118,6 +1150,40 @@ if [ "$VERBOSE_LOGGING" -eq 1 ] && [ ! -x "$TR_PATH" ]; then
     printf 'modulejail: error: --verbose-logging requires tr at %s (install coreutils or override via MODULEJAIL_TR_PATH)\n' \
         "$TR_PATH" >&2
     exit $EX_NOINPUT
+fi
+
+# --- Warn-only (permissive audit) mode requirements (#30) ---
+# --warn-only install lines log a "would-block" syslog event and then load
+# the module via `modprobe --ignore-install <mod>`. The --ignore-install flag
+# does double duty: it performs the real insmod AND stops modprobe from
+# re-entering this same install directive (which would otherwise recurse
+# forever). Two things must exist at generation time:
+#   1. a logger binary - the audit event is the entire purpose of the mode
+#      (USE_LOGGER is already resolved above; --no-syslog-logging is rejected).
+#   2. an executable modprobe - the load half of every install line.
+# The modprobe path is stamped absolute into each line (the install command
+# runs under modprobe's own `sh -c` with a minimal PATH). It is overridable
+# via MODULEJAIL_MODPROBE_PATH for fixtures (test-only plumbing, cf.
+# MODULEJAIL_LOGGER_PATH / MODULEJAIL_TR_PATH).
+if [ "$WARN_ONLY" -eq 1 ]; then
+    if [ -z "$USE_LOGGER" ]; then
+        printf 'modulejail: error: --warn-only requires the logger binary at %s (the would-block audit line needs it; install util-linux or override via MODULEJAIL_LOGGER_PATH)\n' \
+            "${MODULEJAIL_LOGGER_PATH:-/usr/bin/logger}" >&2
+        exit $EX_NOINPUT
+    fi
+    MODPROBE_PATH=${MODULEJAIL_MODPROBE_PATH:-}
+    if [ -z "$MODPROBE_PATH" ]; then
+        for _cand in /usr/sbin/modprobe /sbin/modprobe; do
+            if [ -x "$_cand" ]; then
+                MODPROBE_PATH="$_cand"
+                break
+            fi
+        done
+    fi
+    if [ -z "$MODPROBE_PATH" ] || [ ! -x "$MODPROBE_PATH" ]; then
+        printf 'modulejail: error: --warn-only requires an executable modprobe (looked for /usr/sbin/modprobe and /sbin/modprobe; install kmod or override via MODULEJAIL_MODPROBE_PATH)\n' >&2
+        exit $EX_NOINPUT
+    fi
 fi
 
 # --- Pre-flight: verify this is a Linux host with the required kernel ---
@@ -1504,6 +1570,30 @@ parse_whitelist_file() {
 # generation time by awk, so the emitted line carries a literal module
 # name, not a $name reference.
 emit_install_line() {
+    if [ "$WARN_ONLY" -eq 1 ]; then
+        # Permissive audit mode (#30): log a "would-block" event, then load
+        # the module anyway via `modprobe --ignore-install` (which also breaks
+        # the install-directive recursion). USE_LOGGER and MODPROBE_PATH are
+        # guaranteed present by the warn-only requirement checks above, and
+        # --fail-on-module-load / --no-syslog-logging are rejected as
+        # contradictory, so this branch never has to fall back.
+        if [ "$VERBOSE_LOGGING" -eq 1 ]; then
+            # Enriched form: same no-`/bin/sh -c`-wrapper reasoning as the
+            # enforcing verbose branch (so $PPID resolves to modprobe, not a
+            # nested shell), with the trailing `; exit 0` replaced by the
+            # real load `; <modprobe> --ignore-install <name>`.
+            awk -v tr="$TR_PATH" -v mp="$MODPROBE_PATH" '{
+                printf "install %s /usr/bin/logger -t modulejail \"would-block: %s ppid=$PPID pcomm=$(cat /proc/$PPID/comm 2>/dev/null) loginuid=$(cat /proc/$PPID/loginuid 2>/dev/null) pexe=$(%s -d '\''\\\\001-\\\\010\\\\013-\\\\037\\\\177'\'' < /proc/$PPID/cmdline 2>/dev/null | %s '\''\\\\0'\'' '\'' '\'' 2>/dev/null)\" 2>/dev/null; %s --ignore-install %s\n", $1, $1, tr, tr, mp, $1
+            }' "$1"
+        else
+            # Plain form (matches the #30 request): /bin/sh -c wrapper with a
+            # would-block logger call, then the real load via --ignore-install.
+            awk -v mp="$MODPROBE_PATH" '{
+                printf "install %s /bin/sh -c '\''/usr/bin/logger -t modulejail \"would-block: %s\" 2>/dev/null; %s --ignore-install %s'\''\n", $1, $1, mp, $1
+            }' "$1"
+        fi
+        return
+    fi
     if [ -n "$USE_LOGGER" ]; then
         if [ "$VERBOSE_LOGGING" -eq 1 ]; then
             # Verbose form (v1.3.4+, fixed in v1.3.5 and v1.3.6 per
@@ -1653,7 +1743,13 @@ render_blacklist_file() {
         printf '# profile: %s\n' "$profile"
         printf '# kernel: %s\n' "$_kver"
         printf '# fingerprint: sha256:%s\n' "$fingerprint"
-        if [ -n "$USE_LOGGER" ]; then
+        if [ "$WARN_ONLY" -eq 1 ]; then
+            if [ "$VERBOSE_LOGGING" -eq 1 ]; then
+                printf '# install-line: logger "would-block:" + ppid/loginuid/pcomm/pexe context + modprobe --ignore-install (WARN-ONLY: module still loads, syslog tag: modulejail, --warn-only --verbose-logging)\n'
+            else
+                printf '# install-line: /bin/sh + logger "would-block:" + modprobe --ignore-install (WARN-ONLY: module still loads, syslog tag: modulejail, --warn-only)\n'
+            fi
+        elif [ -n "$USE_LOGGER" ]; then
             if [ "$VERBOSE_LOGGING" -eq 1 ]; then
                 if [ "$FAIL_ON_MODULE_LOAD" -eq 0 ]; then
                     printf '# install-line: /bin/sh + logger + ppid/loginuid/pcomm/pexe context (syslog tag: modulejail, --verbose-logging)\n'

@@ -302,6 +302,44 @@ otherwise); mutually exclusive with
 .BR \-\-no\-syslog\-logging .
 Available since v1.3.4.
 .TP
+.B \-\-warn\-only
+Permissive audit mode. Instead of blocking, each install line logs a
+.IR "would-block: <module>"
+event to syslog (tag
+.BR modulejail )
+and then loads the module anyway via
+.BR "modprobe \-\-ignore\-install <module>" .
+The
+.B \-\-ignore\-install
+flag does double duty: it performs the real
+.B insmod
+and stops
+.B modprobe
+re-entering the same install directive (which would otherwise recurse).
+Nothing is actually blocked, so the host keeps working while you observe,
+in the log, exactly what an enforcing run would block. This is the safe
+way to trial a profile on an unfamiliar system before committing. Requires
+.I /usr/bin/logger
+and an executable
+.B modprobe
+(searched at
+.I /usr/sbin/modprobe
+then
+.IR /sbin/modprobe ;
+modulejail exits
+.B 66
+.RB ( EX_NOINPUT )
+if either is missing). Mutually exclusive with
+.B \-f\ /\ \-\-fail\-on\-module\-load
+and
+.BR \-\-no\-syslog\-logging
+(both exit
+.B 64
+.RB ( EX_USAGE ));
+composes with
+.BR \-\-verbose\-logging .
+Available since v1.6.
+.TP
 .BR \-V ", " \-\-version
 Print version, repository URL, and license, then exit
 .BR 0 .

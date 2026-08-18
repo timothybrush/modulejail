@@ -716,6 +716,49 @@ or, without logger:
 # install-line: /bin/false (silent, --fail-on-module-load)
 ```
 
+## Warn-only mode (`--warn-only`)
+
+`--warn-only` turns ModuleJail into an audit instrument instead of an
+enforcer. Every module that would normally be blacklisted still loads,
+but each load first logs a `would-block: <module>` line to syslog. It is
+the safe way to trial a profile on an unfamiliar system: run it, use the
+machine for a day, then read the log to see exactly what an enforcing run
+would have blocked. Nothing breaks in the meantime.
+
+```sh
+sudo modulejail --warn-only
+```
+
+The install-line body logs the event and then loads the module via
+`modprobe --ignore-install` (the same escape hatch documented in
+[Scope](#scope-of-the-blacklist-what-it-blocks-what-it-doesnt) below),
+which both performs the real load and prevents the install line from
+recursing into itself:
+
+```
+install yenta_socket /bin/sh -c '/usr/bin/logger -t modulejail "would-block: yenta_socket" 2>/dev/null; /sbin/modprobe --ignore-install yenta_socket'
+```
+
+The header annotation reflects the mode:
+
+```
+# install-line: /bin/sh + logger "would-block:" + modprobe --ignore-install (WARN-ONLY: module still loads, syslog tag: modulejail, --warn-only)
+```
+
+Watch the audit trail while you exercise the host:
+
+```sh
+journalctl -ft modulejail
+```
+
+When you are satisfied nothing essential shows up as `would-block:`, drop
+the flag and re-run to switch from audit to enforcement. `--warn-only`
+requires `/usr/bin/logger` and `modprobe`, is mutually exclusive with
+`-f` / `--fail-on-module-load` and `--no-syslog-logging`, and composes
+with `--verbose-logging` (which adds the caller's PID, loginuid, and
+argv[0] to each `would-block:` line, so you can see what tried to pull
+the module in).
+
 ## Scope of the blacklist (what it blocks, what it doesn't)
 
 A `modprobe.d` blacklist blocks **automatic** module loading: udev
@@ -815,6 +858,7 @@ picture.
 | `--no-syslog-logging` | Force `/bin/true` install lines (v1.1.4 behavior). By default, blocked module loads are logged to syslog with tag `modulejail` |
 | `-f`, `--fail-on-module-load` | Blocked module loads return a non-zero exit code (`modprobe` fails loudly). Default: blocked loads silently succeed |
 | `--verbose-logging` | Enrich the per-blocked-load `logger` call with the caller's `ppid`, `loginuid`, `pcomm`, and `pexe` (read from `/proc/$PPID/...`). Requires `/usr/bin/logger`; mutually exclusive with `--no-syslog-logging`. Default `logger` output is the bare `"blocked: <module>"` form (since v1.3.4) |
+| `--warn-only` | Permissive audit mode: log a `would-block: <module>` event to syslog, then load the module anyway via `modprobe --ignore-install`. Nothing is blocked, so you can trial a profile on an unfamiliar host and read the log to see what an enforcing run would block. Requires `/usr/bin/logger` and `modprobe`; mutually exclusive with `-f` / `--fail-on-module-load` and `--no-syslog-logging`; composes with `--verbose-logging` (since v1.6) |
 | `--dry-run` | Compute the would-be blacklist and print a summary to stdout; do NOT write the output file or touch `/etc/modprobe.d/`. Header is rerouted to stderr. Exit code is `0` on simulated success (since v1.3) |
 | `--quiet` | Suppress all non-error stderr output (info lines, summary, header echo). Errors still surface. Mutually exclusive with `--verbose` (since v1.3) |
 | `--verbose` | Emit per-module decision lines on stderr (which module was kept, which was blacklisted, and why). Mutually exclusive with `--quiet` (since v1.3) |

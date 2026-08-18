@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-08-18
+
+### Added
+
+- **`--warn-only` permissive audit mode** (requested by @eamathw, #30). Emits
+  install lines that log a `would-block: <module>` event to syslog (tag
+  `modulejail`) and then load the module anyway via
+  `modprobe --ignore-install <module>`. The `--ignore-install` flag performs
+  the real `insmod` and also stops `modprobe` re-entering the same install
+  directive (no recursion). Nothing is blocked, so operators can trial a
+  profile on an unfamiliar host and read the log to see exactly what an
+  enforcing run would block before committing. Requires `/usr/bin/logger` and
+  an executable `modprobe` (searched at `/usr/sbin/modprobe` then
+  `/sbin/modprobe`, stamped absolute into each line because `modprobe` runs
+  the install command under a minimal `PATH`). Mutually exclusive with `-f` /
+  `--fail-on-module-load` and `--no-syslog-logging`; composes with
+  `--verbose-logging` (the enriched `would-block:` line keeps the caller's
+  ppid/loginuid/pcomm/pexe context). Not yet wired up on NixOS. Verified
+  end-to-end on a live 6.12 kernel: the module loads, the audit event reaches
+  the journal, and no recursion occurs.
+
 ## [1.5.2] - 2026-08-08
 
 ### Fixed
