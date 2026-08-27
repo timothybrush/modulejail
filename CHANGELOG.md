@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-08-27
+
+### Added
+
+- **`firewall` profile** (prompted by @teou1's `xt_recent` report in #16). A
+  fourth built-in profile: conservative plus the whole netfilter toolkit
+  (roughly 240 modules across `iptables`/`nftables`/`ipset`/IPVS/`ebtables`
+  match, target, and helper families). Netfilter match/target modules autoload
+  on demand when a rule first references them, so a firewall host whose full
+  rule set is not active when modulejail runs would otherwise get them
+  blacklisted and a later rule would fail to load. `-p firewall` keeps the
+  subsystem so no rule can be broken; marginal attack surface is low because
+  these modules are reachable only with `CAP_NET_ADMIN` (rule installation),
+  outside the unprivileged-to-root threat model. Profiles are not cumulative,
+  so desktop hosts that also firewall can instead add the same set via the new
+  `examples/whitelist-firewall.conf` drop-in (`-p desktop --whitelist-file
+  examples/whitelist-firewall.conf`). Fixture:
+  `firewall-profile-keeps-netfilter.sh`.
+
 ## [1.6.0] - 2026-08-18
 
 ### Added

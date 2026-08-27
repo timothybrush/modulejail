@@ -361,6 +361,33 @@ matrix.
 .B desktop
 Conservative plus WiFi, Bluetooth, audio, and video drivers. For
 laptops and workstations.
+.TP
+.B firewall
+Conservative plus the netfilter toolkit: the
+.BR iptables ,
+.BR nftables ,
+.BR ipset ,
+IPVS, and
+.B ebtables
+match, target, and helper modules (roughly 240 modules). For firewall,
+router, and gateway hosts. Netfilter match and target modules autoload
+on demand when a rule first references them, so a host whose full rule
+set is not active when modulejail runs would otherwise get them
+blacklisted and a later rule would fail to load them
+.RB ( xt_recent ,
+gh #16). This profile keeps the whole subsystem so no rule can be broken
+by the blacklist; the marginal attack surface is low because these
+modules are reachable only by a process holding
+.B CAP_NET_ADMIN
+(rule installation), which is outside modulejail's unprivileged-to-root
+threat model. Profiles are not cumulative, so a desktop host that also
+firewalls should select
+.B \-p desktop
+and add
+.I examples/whitelist\-firewall.conf
+(the same set) via
+.BR \-\-whitelist\-file .
+Available since v1.6.1.
 
 .SH SYSADMIN WHITELIST
 A site-local

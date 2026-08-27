@@ -436,7 +436,7 @@ modules are never blacklisted regardless of the running profile.
 
 ## Profiles
 
-ModuleJail ships three built-in baseline profiles. The selected profile
+ModuleJail ships four built-in baseline profiles. The selected profile
 determines which modules are always preserved regardless of loaded state.
 
 ```sh
@@ -444,6 +444,7 @@ determines which modules are always preserved regardless of loaded state.
 sudo sh modulejail -p conservative
 sudo sh modulejail -p minimal
 sudo sh modulejail -p desktop
+sudo sh modulejail -p firewall
 ```
 
 Profile descriptions (from `--help`):
@@ -452,15 +453,45 @@ Profile descriptions (from `--help`):
   minimal       Core filesystems + essential kernel modules only
   conservative  Minimal + common server/VM drivers (default)
   desktop       Conservative + WiFi, Bluetooth, audio, video drivers
+  firewall      Conservative + the netfilter toolkit (iptables/nftables/
+                ipset/IPVS/ebtables match, target, and helper modules)
 ```
 
 `conservative` is the right choice for virtualised or bare-metal server
 Linux. `desktop` is for laptops and workstations where WiFi, Bluetooth,
 audio, video drivers, and SD card readers (`mmc_core` / `mmc_block`,
 added v1.4 after [#16](https://github.com/jnuyens/modulejail/issues/16))
-must be preserved. `minimal` is for environments where you have full
-control over which drivers are loaded and want the smallest possible
-baseline.
+must be preserved. `firewall` is for firewall, router, and gateway hosts
+(see below). `minimal` is for environments where you have full control
+over which drivers are loaded and want the smallest possible baseline.
+
+### The firewall profile
+
+Netfilter match and target modules (`xt_recent`, `xt_hashlimit`,
+`nf_conntrack` helpers, `nft_*` expressions, ipset, IPVS, ebtables, and so
+on) autoload on demand: the kernel pulls them in only when an
+iptables/nftables/ipset rule first references them. So on a firewall whose
+full rule set is not active when ModuleJail runs (the firewall was
+temporarily down, or a rule gets added later), those modules look unused
+and get blacklisted, and the next rule that needs one fails to load it.
+This is exactly what [#16](https://github.com/jnuyens/modulejail/issues/16)
+reported for `xt_recent` after a firewall was briefly disabled.
+
+`-p firewall` keeps the whole netfilter subsystem (conservative plus
+roughly 240 netfilter modules) so no rule can be broken by the blacklist.
+The marginal attack surface is low: these modules are reachable only by a
+process holding `CAP_NET_ADMIN` (installing a rule), which is outside
+ModuleJail's unprivileged-to-root threat model.
+
+Profiles are not cumulative, so you cannot select `desktop` and `firewall`
+together. A laptop or workstation that also runs a firewall should pick
+`-p desktop` and add the same netfilter set through a whitelist file, which
+ships ready-made at
+[`examples/whitelist-firewall.conf`](examples/whitelist-firewall.conf):
+
+```sh
+sudo sh modulejail -p desktop --whitelist-file examples/whitelist-firewall.conf
+```
 
 ### Categories deliberately NOT in any baseline
 
@@ -851,7 +882,7 @@ picture.
 
 | Option | Description |
 |--------|-------------|
-| `-p`, `--profile {minimal\|conservative\|desktop\|none}` | Built-in baseline profile (default: `conservative`). `none` carries no built-in baseline at all - only currently-loaded modules and any `--whitelist-file` entries are preserved. Recommended only when an explicit `--whitelist-file` is supplied (since v1.3) |
+| `-p`, `--profile {minimal\|conservative\|desktop\|firewall\|none}` | Built-in baseline profile (default: `conservative`). `firewall` is conservative plus the full netfilter toolkit for firewall/router/gateway hosts (since v1.6.1). `none` carries no built-in baseline at all - only currently-loaded modules and any `--whitelist-file` entries are preserved. Recommended only when an explicit `--whitelist-file` is supplied (since v1.3) |
 | `-o`, `--output PATH` | Output path for the generated blacklist file (default: `/etc/modprobe.d/modulejail-blacklist.conf`) |
 | `--whitelist-file PATH` | Append module names from PATH to the keep-set. One module per line; `#` starts a comment. File must be owned by root (or by the invoking user) and must not be group- or world-writable; the error message proposes the exact `sudo chown` / `sudo chmod` command to fix. Default: `/etc/modulejail/whitelist.conf` (since v1.4 the default path is the recommended home for site-local additions instead of editing the in-script `WHITELIST=` line) |
 | `--no-whitelist-file` | Skip the default whitelist file even if present. Mutually exclusive with `--whitelist-file PATH` |
